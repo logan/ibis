@@ -118,19 +118,19 @@ func generateColumnType(field reflect.StructField) (string, bool) {
 	return result, ok
 }
 
-func GetLiveSchema(session *gocql.Session, keyspace string) (*Schema, error) {
+func (c *CassandraConn) GetLiveSchema() (*Schema, error) {
 	schema := Schema{make(map[string]*Table)}
 	var err error
-	tables, err := getLiveColumnFamilies(session, keyspace)
+	tables, err := getLiveColumnFamilies(c.Session, c.Config.Keyspace)
 	if err != nil {
 		return nil, err
 	}
 	for _, t := range tables {
 		schema.Tables[strings.ToLower(t.Name)] = t
 	}
-	q := session.Query(
+	q := c.Session.Query(
 		`SELECT columnfamily_name, column_name, validator FROM system.schema_columns
-             WHERE keyspace_name = ?`, keyspace)
+             WHERE keyspace_name = ?`, c.Config.Keyspace)
 	i := q.Iter()
 	var cf_name, col_name, validator string
 	for i.Scan(&cf_name, &col_name, &validator) {
@@ -174,14 +174,14 @@ func keyFromAliases(key_aliases, column_aliases string) []string {
 	return append(parseStringList(key_aliases), parseStringList(column_aliases)...)
 }
 
-func DiffLiveSchema(session *gocql.Session, keyspace string, model *Schema) (*SchemaDiff, error) {
+func (c *CassandraConn) DiffLiveSchema() (*SchemaDiff, error) {
 	var live *Schema
 	var err error
-	if live, err = GetLiveSchema(session, keyspace); err != nil {
+	if live, err = c.GetLiveSchema(); err != nil {
 		return nil, err
 	}
 	var diff = &SchemaDiff{make([]*Table, 0), make([]TableAlteration, 0)}
-	for name, model_table := range model.Tables {
+	for name, model_table := range c.Model.Tables {
 		live_table, ok := live.Tables[strings.ToLower(name)]
 		if ok {
 			alteration := TableAlteration{name, make([]Column, 0), make([]Column, 0)}
@@ -207,4 +207,8 @@ func DiffLiveSchema(session *gocql.Session, keyspace string, model *Schema) (*Sc
 		}
 	}
 	return diff, nil
+}
+
+func (c *CassandraConn) ApplySchemaUpdates() error {
+	return c.SchemaUpdates.Apply(c.Session)
 }

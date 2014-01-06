@@ -10,8 +10,20 @@ type CassandraConfig struct {
 	Node        []string
 }
 
-func DialCassandra(config CassandraConfig) (*gocql.Session, error) {
-	return makeCluster(config).CreateSession()
+type CassandraConn struct {
+	Config        CassandraConfig
+	Session       *gocql.Session
+	Model         *Schema
+	SchemaUpdates *SchemaDiff
+}
+
+func DialCassandra(config CassandraConfig) (*CassandraConn, error) {
+	var session *gocql.Session
+	var err error
+	if session, err = makeCluster(config).CreateSession(); err != nil {
+		return nil, err
+	}
+	return &CassandraConn{Config: config, Session: session}, nil
 }
 
 func makeCluster(config CassandraConfig) *gocql.ClusterConfig {
@@ -46,4 +58,11 @@ func parseConsistency(value string) (consistency gocql.Consistency) {
 		consistency = gocql.LocalSerial
 	}
 	return
+}
+
+func (c *CassandraConn) SetModel(model *Schema) error {
+	var err error
+	c.Model = model
+	c.SchemaUpdates, err = c.DiffLiveSchema()
+	return err
 }
