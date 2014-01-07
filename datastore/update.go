@@ -141,17 +141,17 @@ func keyFromAliases(key_aliases, column_aliases string) []string {
 	return append(parseStringList(key_aliases), parseStringList(column_aliases)...)
 }
 
-// DiffLiveSchema compares the current schema in Cassandra to the model defined as part of the
-// CassandraConn. It returns a pointer to a SchemaDiff describing the differences. If the two
-// schemas are identical, then this SchemaDiff will be empty.
-func DiffLiveSchema(c *CassandraConn) (*SchemaDiff, error) {
+// DiffLiveSchema compares the current schema in Cassandra to the given model. It returns a pointer
+// to a SchemaDiff describing the differences. If the two schemas are identical, then this
+// SchemaDiff will be empty.
+func DiffLiveSchema(c *CassandraConn, model *Schema) (*SchemaDiff, error) {
 	var live *Schema
 	var err error
 	if live, err = GetLiveSchema(c); err != nil {
 		return nil, err
 	}
 	var diff = &SchemaDiff{make([]*Table, 0), make([]TableAlteration, 0)}
-	for name, model_table := range c.Model.Tables {
+	for name, model_table := range model.Tables {
 		live_table, ok := live.Tables[strings.ToLower(name)]
 		if ok {
 			alteration := TableAlteration{name, make([]Column, 0), make([]Column, 0)}

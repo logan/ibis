@@ -29,10 +29,10 @@ type RowData map[string]interface{}
 // struct can be saved to and loaded from Cassandra.
 //
 //   page := &Page{Path: "/", Title: "Home Page", Body: "Welcome!", Views: 0, Public: true}
-//   cassandraConn.Create(page)
+//   orm.Create(page)
 //
 //   loaded := Page{}
-//   cassandraConn.LoadByKey(&loaded, "/")
+//   orm.LoadByKey(&loaded, "/")
 type Persistent struct {
 	_loadedColumns RowData
 }
@@ -48,6 +48,35 @@ func (s *Persistent) loadedColumns() RowData {
 		s._loadedColumns = make(RowData)
 	}
 	return s._loadedColumns
+}
+
+type Orm struct {
+	*CassandraConn
+	Model         *Schema     // The tables (column families) to use in this keyspace.
+	SchemaUpdates *SchemaDiff // The differences found between the existing column families and the given Model.
+}
+
+// DialOrm establishes a connection to Cassandra and returns an Orm pointer for storing and loading
+// Persistables according to a given model.
+func DialOrm(config CassandraConfig, model *Schema) (*Orm, error) {
+	conn, err := DialCassandra(config)
+	if err != nil {
+		return nil, err
+	}
+	orm := &Orm{CassandraConn: conn, Model: model}
+	orm.SchemaUpdates, err = DiffLiveSchema(conn, model)
+	return orm, err
+}
+
+// RequiresUpdates returns true if the Orm model differs from the existing column families in
+// Cassandra.
+func (orm *Orm) RequiresUpdates() bool {
+	return orm.SchemaUpdates.Size() > 0
+}
+
+// ApplySchemaUpdates applies any required modifications to the live schema to match the Orm model.
+func (orm *Orm) ApplySchemaUpdates() error {
+	return orm.SchemaUpdates.Apply(orm.Session)
 }
 
 var placeholderListString string
@@ -66,16 +95,16 @@ func placeholderList(n int) string {
 
 // Create inserts a filled-in "row" into its column family. An error is returned if a row already
 // exists with the same primary key.
-func (c *CassandraConn) Create(row Persistable) error {
-	return c.commit(row, true)
+func (orm *Orm) Create(row Persistable) error {
+	return orm.commit(row, true)
 }
 
 // Commit writes any modified values in a loaded "row" to its column family.
-func (c *CassandraConn) Commit(row Persistable) error {
-	return c.commit(row, false)
+func (orm *Orm) Commit(row Persistable) error {
+	return orm.commit(row, false)
 }
 
-func (c *CassandraConn) commit(row Persistable, ifnotexists bool) error {
+func (orm *Orm) commit(row Persistable, ifnotexists bool) error {
 	row_type := reflect.TypeOf(row)
 	table, ok := tableCache[row_type]
 	if !ok {
@@ -91,7 +120,7 @@ func (c *CassandraConn) commit(row Persistable, ifnotexists bool) error {
 	}
 	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)%s",
 		table.Name, strings.Join(newk, ", "), placeholderList(len(newk)), ifne)
-	q := c.Query(stmt, newv...)
+	q := orm.Query(stmt, newv...)
 	var applied bool
 	if err := q.Scan(&applied); err != nil {
 		return err
@@ -135,7 +164,7 @@ func getColumnValues(table *Table, row Persistable) map[string]interface{} {
 
 // LoadByKey loads data from a row's column family into that row. The row is selected by the given
 // key values, which must correspond to the column family's defined primary key.
-func (c *CassandraConn) LoadByKey(row Persistable, key ...interface{}) error {
+func (orm *Orm) LoadByKey(row Persistable, key ...interface{}) error {
 	ptr_type := reflect.TypeOf(row)
 	ptr_value := reflect.ValueOf(row)
 	row_value := reflect.Indirect(ptr_value)
@@ -157,7 +186,7 @@ func (c *CassandraConn) LoadByKey(row Persistable, key ...interface{}) error {
 	}
 	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
 		strings.Join(cols, ", "), table.Name, strings.Join(rules, " AND "))
-	q := c.Query(stmt, key...)
+	q := orm.Query(stmt, key...)
 	if err := q.Scan(dests...); err != nil {
 		return err
 	}

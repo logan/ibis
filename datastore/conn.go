@@ -18,13 +18,10 @@ type CassandraConfig struct {
 	Consistency string
 }
 
-// CassandraConn is an open connection to a Cassandra cluster, associated with a particular keyspace
-// and Model definition.
+// CassandraConn is an open connection to a Cassandra cluster associated with a particular keyspace.
 type CassandraConn struct {
 	*gocql.Session                 // The underlying gocql Session, for querying the cluster.
 	Config         CassandraConfig // The settings used to establish the session.
-	Model          *Schema         // The tables (column families) to use in this keyspace.
-	SchemaUpdates  *SchemaDiff     // The differences found between the existing column families and the given Model.
 }
 
 // DialCassandra connects to a Cassandra cluster as specified by the given config.
@@ -69,20 +66,4 @@ func parseConsistency(value string) (consistency gocql.Consistency) {
 		consistency = gocql.LocalSerial
 	}
 	return
-}
-
-// SetModel associates a Model definition with the connection and queries the cluster to determine
-// how it differs from the existing column families. This fills out the SchemaUpdates field, which
-// can be used to apply CQL commands to bring the keyspace up to date with the Model.
-func (c *CassandraConn) SetModel(model *Schema) error {
-	var err error
-	c.Model = model
-	c.SchemaUpdates, err = DiffLiveSchema(c)
-	return err
-}
-
-// ApplySchemaUpdates applies any required modifications to the live schema to match the model
-// defined in the CassandraConn, as determined when the CassandraConn was created.
-func (c *CassandraConn) ApplySchemaUpdates() error {
-	return c.SchemaUpdates.Apply(c.Session)
 }
