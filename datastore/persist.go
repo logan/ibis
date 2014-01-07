@@ -9,19 +9,19 @@ type TableCache map[reflect.Type]*Table
 
 var tableCache TableCache = make(TableCache)
 
-type StorableData map[string]interface{}
+type RowData map[string]interface{}
 
-type Storable interface {
-	loadedColumns() StorableData
+type Persistable interface {
+	loadedColumns() RowData
 }
 
-type Stored struct {
-	_loadedColumns StorableData
+type Persistent struct {
+	_loadedColumns RowData
 }
 
-func (s *Stored) loadedColumns() StorableData {
+func (s *Persistent) loadedColumns() RowData {
 	if s._loadedColumns == nil {
-		s._loadedColumns = make(StorableData)
+		s._loadedColumns = make(RowData)
 	}
 	return s._loadedColumns
 }
@@ -40,15 +40,15 @@ func placeholderList(n int) string {
 	return placeholderListString[:3*(n-1)+1]
 }
 
-func (c *CassandraConn) Create(row Storable) error {
+func (c *CassandraConn) Create(row Persistable) error {
 	return c.commit(row, true)
 }
 
-func (c *CassandraConn) Commit(row Storable) error {
+func (c *CassandraConn) Commit(row Persistable) error {
 	return c.commit(row, false)
 }
 
-func (c *CassandraConn) commit(row Storable, ifnotexists bool) error {
+func (c *CassandraConn) commit(row Persistable, ifnotexists bool) error {
 	row_type := reflect.TypeOf(row)
 	table, ok := tableCache[row_type]
 	if !ok {
@@ -79,7 +79,7 @@ func (c *CassandraConn) commit(row Storable, ifnotexists bool) error {
 	return nil
 }
 
-func getColumnsToCommit(table *Table, row Storable) (newk []string, newv []interface{}) {
+func getColumnsToCommit(table *Table, row Persistable) (newk []string, newv []interface{}) {
 	values := getColumnValues(table, row)
 	newk = make([]string, 0, len(values))
 	newv = make([]interface{}, 0, len(values))
@@ -94,9 +94,9 @@ func getColumnsToCommit(table *Table, row Storable) (newk []string, newv []inter
 	return
 }
 
-func getColumnValues(table *Table, row Storable) map[string]interface{} {
+func getColumnValues(table *Table, row Persistable) map[string]interface{} {
 	value := reflect.Indirect(reflect.ValueOf(row))
-	result := make(StorableData)
+	result := make(RowData)
 	for _, col := range table.Columns {
 		fieldv := value.FieldByName(col.Name)
 		if fieldv.IsValid() {
@@ -106,7 +106,7 @@ func getColumnValues(table *Table, row Storable) map[string]interface{} {
 	return result
 }
 
-func (c *CassandraConn) LoadByKey(row Storable, key ...interface{}) error {
+func (c *CassandraConn) LoadByKey(row Persistable, key ...interface{}) error {
 	ptr_type := reflect.TypeOf(row)
 	ptr_value := reflect.ValueOf(row)
 	row_value := reflect.Indirect(ptr_value)
