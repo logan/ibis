@@ -11,16 +11,8 @@ func NewSchema() *Schema {
 	return &Schema{make(map[string]*Table)}
 }
 
-func (s *Schema) AddTable(table interface{}, options TableOptions) {
-	var t *Table
-	switch table.(type) {
-	default:
-		t = GenerateTable(table, options)
-	case *Table:
-		t = table.(*Table)
-		t.Options = options
-	}
-	s.Tables[strings.ToLower(t.Name)] = t
+func (s *Schema) AddTable(table *Table) {
+	s.Tables[strings.ToLower(table.Name)] = table
 }
 
 type Table struct {

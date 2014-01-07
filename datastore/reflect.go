@@ -99,20 +99,44 @@ func GenerateTable(model interface{}, options TableOptions) *Table {
 	return table
 }
 
+func DefineTable(instance interface{}, options TableOptions) *Table {
+	ptr_type := reflect.TypeOf(instance)
+	if ptr_type.Kind() != reflect.Ptr {
+		panic("instance must be pointer to struct")
+	}
+	instance_type := reflect.Indirect(reflect.ValueOf(instance)).Type()
+	if instance_type.Kind() != reflect.Struct {
+		panic("instance must be pointer to struct")
+	}
+	table := &Table{instance_type.Name(), make([]Column, 0, instance_type.NumField()), options}
+	for i := 0; i < instance_type.NumField(); i++ {
+		if column, ok := generateColumn(instance_type.Field(i)); ok {
+			table.Columns = append(table.Columns, column)
+		}
+	}
+	tableCache[ptr_type] = table
+	fmt.Printf("table registered for type %v\n", ptr_type)
+	return table
+}
+
+func TableFrom(instance interface{}) *Table {
+	return tableCache[reflect.TypeOf(instance)]
+}
+
 func generateColumn(field reflect.StructField) (Column, bool) {
-	ts, ok := generateColumnType(field)
+	ts, ok := generateColumnType(field.Type)
 	if ok {
 		return Column{field.Name, ts}, true
 	}
 	return Column{}, ok
 }
 
-func generateColumnType(field reflect.StructField) (string, bool) {
+func generateColumnType(t reflect.Type) (string, bool) {
 	var type_name string
-	if field.Type.PkgPath() == "" {
-		type_name = field.Type.Name()
+	if t.PkgPath() == "" {
+		type_name = t.Name()
 	} else {
-		type_name = field.Type.PkgPath() + "." + field.Type.Name()
+		type_name = t.PkgPath() + "." + t.Name()
 	}
 	result, ok := ColumnTypeMap[type_name]
 	return result, ok
@@ -187,11 +211,11 @@ func (c *CassandraConn) DiffLiveSchema() (*SchemaDiff, error) {
 			alteration := TableAlteration{name, make([]Column, 0), make([]Column, 0)}
 			old_cols := make(map[string]string)
 			for _, col := range live_table.Columns {
-				old_cols[col.Name] = col.Type
+				old_cols[strings.ToLower(col.Name)] = col.Type
 			}
 			for _, col := range model_table.Columns {
 				var old_type string
-				if old_type, ok = old_cols[col.Name]; ok {
+				if old_type, ok = old_cols[strings.ToLower(col.Name)]; ok {
 					if old_type != col.Type {
 						alteration.AlteredColumns = append(alteration.AlteredColumns, col)
 					}
