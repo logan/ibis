@@ -2,7 +2,6 @@ package datastore
 
 import "encoding/json"
 import "fmt"
-import "reflect"
 import "strings"
 
 import "tux21b.org/v1/gocql"
@@ -69,77 +68,12 @@ func (a TableAlteration) AlterStatements() []string {
 	return alts
 }
 
-var ColumnTypeMap = map[string]string{
-	"bool":      "boolean",
-	"float64":   "double",
-	"int64":     "bigint",
-	"string":    "varchar",
-	"time.Time": "timestamp",
-}
-
 var column_validators = map[string]string{
 	"org.apache.cassandra.db.marshal.BooleanType":   "boolean",
 	"org.apache.cassandra.db.marshal.DoubleType":    "double",
 	"org.apache.cassandra.db.marshal.LongType":      "long",
 	"org.apache.cassandra.db.marshal.TimestampType": "timestamp",
 	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
-}
-
-func GenerateTable(model interface{}, options TableOptions) *Table {
-	model_type := reflect.TypeOf(model)
-	if model_type.Kind() != reflect.Struct {
-		panic("model must be a struct")
-	}
-	table := &Table{model_type.Name(), make([]Column, 0, model_type.NumField()), options}
-	for i := 0; i < model_type.NumField(); i++ {
-		if column, ok := generateColumn(model_type.Field(i)); ok {
-			table.Columns = append(table.Columns, column)
-		}
-	}
-	return table
-}
-
-func DefineTable(instance interface{}, options TableOptions) *Table {
-	ptr_type := reflect.TypeOf(instance)
-	if ptr_type.Kind() != reflect.Ptr {
-		panic("instance must be pointer to struct")
-	}
-	instance_type := reflect.Indirect(reflect.ValueOf(instance)).Type()
-	if instance_type.Kind() != reflect.Struct {
-		panic("instance must be pointer to struct")
-	}
-	table := &Table{instance_type.Name(), make([]Column, 0, instance_type.NumField()), options}
-	for i := 0; i < instance_type.NumField(); i++ {
-		if column, ok := generateColumn(instance_type.Field(i)); ok {
-			table.Columns = append(table.Columns, column)
-		}
-	}
-	tableCache[ptr_type] = table
-	fmt.Printf("table registered for type %v\n", ptr_type)
-	return table
-}
-
-func TableFrom(instance interface{}) *Table {
-	return tableCache[reflect.TypeOf(instance)]
-}
-
-func generateColumn(field reflect.StructField) (Column, bool) {
-	ts, ok := generateColumnType(field.Type)
-	if ok {
-		return Column{field.Name, ts}, true
-	}
-	return Column{}, ok
-}
-
-func generateColumnType(t reflect.Type) (string, bool) {
-	var type_name string
-	if t.PkgPath() == "" {
-		type_name = t.Name()
-	} else {
-		type_name = t.PkgPath() + "." + t.Name()
-	}
-	result, ok := ColumnTypeMap[type_name]
-	return result, ok
 }
 
 func (c *CassandraConn) GetLiveSchema() (*Schema, error) {
