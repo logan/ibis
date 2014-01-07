@@ -9,10 +9,13 @@ var (
 	flagKeyspace = flag.String("keyspace", "creative_test", "name of throwaway keyspace for testing")
 )
 
+// A TestConn extends CassandraConn to manage throwaway keyspaces. This guarantees tests a pristine
+// environment before interacting with Cassandra.
 type TestConn struct {
 	*CassandraConn
 }
 
+// NewTestConn connects to Cassandra and establishes an empty keyspace to operate in.
 func NewTestConn() (*TestConn, error) {
 	config := CassandraConfig{
 		Node:        strings.Split(*flagCluster, ","),
@@ -37,19 +40,23 @@ func initKeyspace(config CassandraConfig) error {
 	if err != nil {
 		return err
 	}
-	defer c.Session.Close()
+	defer c.Close()
 
-	q := c.Session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", *flagKeyspace))
+	q := c.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", *flagKeyspace))
 	if err := q.Exec(); err != nil {
 		return err
 	}
 
-	q = c.Session.Query(fmt.Sprintf("CREATE KEYSPACE %s WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}", *flagKeyspace))
+	q = c.Query(fmt.Sprintf("CREATE KEYSPACE %s WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}", *flagKeyspace))
 	return q.Exec()
 }
 
+// Close drops the keyspace and closes the session.
 func (tc *TestConn) Close() error {
-	s := tc.Session
-	q := s.Query(fmt.Sprintf("DROP KEYSPACE %s", *flagKeyspace))
-	return q.Exec()
+	q := tc.Query(fmt.Sprintf("DROP KEYSPACE %s", *flagKeyspace))
+	if err := q.Exec(); err != nil {
+		return err
+	}
+	tc.Session.Close()
+	return nil
 }

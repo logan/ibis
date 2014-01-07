@@ -6,15 +6,18 @@ import "strings"
 
 import "tux21b.org/v1/gocql"
 
+// A SchemaDiff enumerates the changes necessary to transform one schema into another.
 type SchemaDiff struct {
-	Creations   []*Table
-	Alterations []TableAlteration
+	Creations   []*Table          // tables that are completely missing from the former schema
+	Alterations []TableAlteration // tables that have missing or altered columns
 }
 
+// Size returns the total number of creations and alterations in the SchemaDiff.
 func (d *SchemaDiff) Size() int {
 	return len(d.Creations) + len(d.Alterations)
 }
 
+// String constructs a human-readable string describing the SchemaDiff in CQL.
 func (d *SchemaDiff) String() string {
 	if d.Size() == 0 {
 		return "no diff"
@@ -29,6 +32,7 @@ func (d *SchemaDiff) String() string {
 	return strings.Join(changes, "\n")
 }
 
+// Apply issues CQL statements to transform the former schema into the latter.
 func (d *SchemaDiff) Apply(session *gocql.Session) error {
 	for _, t := range d.Creations {
 		if err := session.Query(t.CreateStatement()).Exec(); err != nil {
@@ -45,16 +49,19 @@ func (d *SchemaDiff) Apply(session *gocql.Session) error {
 	return nil
 }
 
+// TableAlteration describes a set of column additions and alterations for a single table.
 type TableAlteration struct {
 	TableName      string
 	NewColumns     []Column
 	AlteredColumns []Column
 }
 
+// Size returns the total number of new and altered columns.
 func (a TableAlteration) Size() int {
 	return len(a.NewColumns) + len(a.AlteredColumns)
 }
 
+// AlterStatements generates a list of CQL statements, one for each new or altered column.
 func (a TableAlteration) AlterStatements() []string {
 	alts := make([]string, 0, a.Size())
 	for _, col := range a.NewColumns {
@@ -76,7 +83,9 @@ var column_validators = map[string]string{
 	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
 }
 
-func (c *CassandraConn) GetLiveSchema() (*Schema, error) {
+// GetLiveSchema builds a schema by querying the column families that exist in the connected
+// keyspace.
+func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 	schema := Schema{make(map[string]*Table)}
 	var err error
 	tables, err := getLiveColumnFamilies(c.Session, c.Config.Keyspace)
@@ -86,7 +95,7 @@ func (c *CassandraConn) GetLiveSchema() (*Schema, error) {
 	for _, t := range tables {
 		schema.Tables[strings.ToLower(t.Name)] = t
 	}
-	q := c.Session.Query(
+	q := c.Query(
 		`SELECT columnfamily_name, column_name, validator FROM system.schema_columns
              WHERE keyspace_name = ?`, c.Config.Keyspace)
 	i := q.Iter()
@@ -132,10 +141,13 @@ func keyFromAliases(key_aliases, column_aliases string) []string {
 	return append(parseStringList(key_aliases), parseStringList(column_aliases)...)
 }
 
-func (c *CassandraConn) DiffLiveSchema() (*SchemaDiff, error) {
+// DiffLiveSchema compares the current schema in Cassandra to the model defined as part of the
+// CassandraConn. It returns a pointer to a SchemaDiff describing the differences. If the two
+// schemas are identical, then this SchemaDiff will be empty.
+func DiffLiveSchema(c *CassandraConn) (*SchemaDiff, error) {
 	var live *Schema
 	var err error
-	if live, err = c.GetLiveSchema(); err != nil {
+	if live, err = GetLiveSchema(c); err != nil {
 		return nil, err
 	}
 	var diff = &SchemaDiff{make([]*Table, 0), make([]TableAlteration, 0)}
@@ -165,8 +177,4 @@ func (c *CassandraConn) DiffLiveSchema() (*SchemaDiff, error) {
 		}
 	}
 	return diff, nil
-}
-
-func (c *CassandraConn) ApplySchemaUpdates() error {
-	return c.SchemaUpdates.Apply(c.Session)
 }

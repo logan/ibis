@@ -12,7 +12,7 @@ func TestGetLiveSchema(t *testing.T) {
 	}
 	defer tc.Close()
 
-	schema, err := tc.GetLiveSchema()
+	schema, err := GetLiveSchema(tc.CassandraConn)
 	if err != nil {
 		t.Error(err)
 	}
@@ -20,7 +20,7 @@ func TestGetLiveSchema(t *testing.T) {
 		t.Errorf("expected empty keyspace")
 	}
 
-	q := tc.Session.Query(`
+	q := tc.Query(`
         CREATE TABLE test (
             boolcol boolean,
             float64col double,
@@ -44,7 +44,7 @@ func TestGetLiveSchema(t *testing.T) {
 		},
 		Options: TableOptions{PrimaryKey: []string{"stringcol", "int64col", "boolcol"}},
 	}
-	schema, err = tc.GetLiveSchema()
+	schema, err = GetLiveSchema(tc.CassandraConn)
 	if err != nil {
 		t.Error(err)
 	}

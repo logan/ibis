@@ -4,24 +4,29 @@ import "fmt"
 import "reflect"
 import "strings"
 
+// Schema is a collection of Table (column family) definitions.
 type Schema struct {
 	Tables map[string]*Table
 }
 
+// NewSchema returns a new, empty schema.
 func NewSchema() *Schema {
 	return &Schema{make(map[string]*Table)}
 }
 
+// AddTable adds a table definition to the schema.
 func (s *Schema) AddTable(table *Table) {
 	s.Tables[strings.ToLower(table.Name)] = table
 }
 
+// A Table describes a column family in Cassandra.
 type Table struct {
-	Name    string
-	Columns []Column
-	Options TableOptions
+	Name    string       // The name of the column family.
+	Columns []Column     // The definition of the column family's columns.
+	Options TableOptions // Options for the column family, such as primary key.
 }
 
+// CreateStatement returns the CQL statement that would create this table.
 func (t Table) CreateStatement() string {
 	cols := make([]string, len(t.Columns))
 	for i, col := range t.Columns {
@@ -31,16 +36,19 @@ func (t Table) CreateStatement() string {
 		t.Name, strings.Join(cols, ", "), strings.Join(t.Options.PrimaryKey, ", "))
 }
 
+// TableOptions is used to provide additional properties for a column family definition.
 type TableOptions struct {
-	PrimaryKey []string
+	PrimaryKey []string // Required. The list of columns comprising the primary key. The first column defines partitions.
 }
 
+// A Column gives the name and data type of a Cassandra column. The value of type should be a CQL
+// data type (e.g. bigint, varchar, double).
 type Column struct {
 	Name string
 	Type string
 }
 
-var ColumnTypeMap = map[string]string{
+var columnTypeMap = map[string]string{
 	"bool":      "boolean",
 	"float64":   "double",
 	"int64":     "bigint",
@@ -48,22 +56,27 @@ var ColumnTypeMap = map[string]string{
 	"time.Time": "timestamp",
 }
 
-func TableFrom(instance interface{}) *Table {
-	return tableCache[reflect.TypeOf(instance)]
+// TableFrom looks up a row's Table definition. Returns nil if no Table has been defined for the row's type.
+func TableFrom(row Persistable) *Table {
+	return tableCache[reflect.TypeOf(row)]
 }
 
-func DefineTable(instance interface{}, options TableOptions) *Table {
-	ptr_type := reflect.TypeOf(instance)
+// DefineTable generates a Table definition from a sample row. The row can be entirely empty. The
+// reflect package is used to inspect the row's data type and generate the column definitions
+// according to its struct fields. Only fields of types that can be mapped to CQL and back are
+// considered.
+func DefineTable(row Persistable, options TableOptions) *Table {
+	ptr_type := reflect.TypeOf(row)
 	if ptr_type.Kind() != reflect.Ptr {
-		panic("instance must be pointer to struct")
+		panic("row must be pointer to struct")
 	}
-	instance_type := reflect.Indirect(reflect.ValueOf(instance)).Type()
-	if instance_type.Kind() != reflect.Struct {
-		panic("instance must be pointer to struct")
+	row_type := reflect.Indirect(reflect.ValueOf(row)).Type()
+	if row_type.Kind() != reflect.Struct {
+		panic("row must be pointer to struct")
 	}
-	table := &Table{instance_type.Name(), make([]Column, 0, instance_type.NumField()), options}
-	for i := 0; i < instance_type.NumField(); i++ {
-		if column, ok := columnFromStructField(instance_type.Field(i)); ok {
+	table := &Table{row_type.Name(), make([]Column, 0, row_type.NumField()), options}
+	for i := 0; i < row_type.NumField(); i++ {
+		if column, ok := columnFromStructField(row_type.Field(i)); ok {
 			table.Columns = append(table.Columns, column)
 		}
 	}
@@ -86,6 +99,6 @@ func goTypeToCassType(t reflect.Type) (string, bool) {
 	} else {
 		type_name = t.PkgPath() + "." + t.Name()
 	}
-	result, ok := ColumnTypeMap[type_name]
+	result, ok := columnTypeMap[type_name]
 	return result, ok
 }

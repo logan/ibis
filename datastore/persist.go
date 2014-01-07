@@ -5,18 +5,42 @@ import "fmt"
 import "reflect"
 import "strings"
 
-type TableCache map[reflect.Type]*Table
+var tableCache = make(map[reflect.Type]*Table)
 
-var tableCache TableCache = make(TableCache)
-
+// RowData is a map of strings to arbitrary values. This represents the fields extracted from an
+// instance of a Table, or the values scanned from a CQL query.
 type RowData map[string]interface{}
 
-type Persistable interface {
-	loadedColumns() RowData
-}
-
+// Persistent is an embeddable struct that provides the ability to persist data to Cassandra. For
+// example:
+//
+//   type Page struct {
+//     datastore.Persistent
+//     Path string
+//     Title string
+//     Body string
+//     Views int64
+//     Public bool
+//   }
+//   var PageTableOptions = datastore.TableOptions{PrimaryKey: []string{"Path"}}
+//   var PageTable = datastore.DefineTable(&Page{}, PageTableOptions)
+//
+// If an empty instance of this struct is passed to DefineTable, then filled in instances of the
+// struct can be saved to and loaded from Cassandra.
+//
+//   page := &Page{Path: "/", Title: "Home Page", Body: "Welcome!", Views: 0, Public: true}
+//   cassandraConn.Create(page)
+//
+//   loaded := Page{}
+//   cassandraConn.LoadByKey(&loaded, "/")
 type Persistent struct {
 	_loadedColumns RowData
+}
+
+// A Persistable is any struct that embeds Persistent. If such a struct is associated with a Table
+// in a Model, then it can be easily persisted to Cassandra.
+type Persistable interface {
+	loadedColumns() RowData
 }
 
 func (s *Persistent) loadedColumns() RowData {
@@ -40,10 +64,13 @@ func placeholderList(n int) string {
 	return placeholderListString[:3*(n-1)+1]
 }
 
+// Create inserts a filled-in "row" into its column family. An error is returned if a row already
+// exists with the same primary key.
 func (c *CassandraConn) Create(row Persistable) error {
 	return c.commit(row, true)
 }
 
+// Commit writes any modified values in a loaded "row" to its column family.
 func (c *CassandraConn) Commit(row Persistable) error {
 	return c.commit(row, false)
 }
@@ -64,7 +91,7 @@ func (c *CassandraConn) commit(row Persistable, ifnotexists bool) error {
 	}
 	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)%s",
 		table.Name, strings.Join(newk, ", "), placeholderList(len(newk)), ifne)
-	q := c.Session.Query(stmt, newv...)
+	q := c.Query(stmt, newv...)
 	var applied bool
 	if err := q.Scan(&applied); err != nil {
 		return err
@@ -106,6 +133,8 @@ func getColumnValues(table *Table, row Persistable) map[string]interface{} {
 	return result
 }
 
+// LoadByKey loads data from a row's column family into that row. The row is selected by the given
+// key values, which must correspond to the column family's defined primary key.
 func (c *CassandraConn) LoadByKey(row Persistable, key ...interface{}) error {
 	ptr_type := reflect.TypeOf(row)
 	ptr_value := reflect.ValueOf(row)
@@ -128,7 +157,7 @@ func (c *CassandraConn) LoadByKey(row Persistable, key ...interface{}) error {
 	}
 	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
 		strings.Join(cols, ", "), table.Name, strings.Join(rules, " AND "))
-	q := c.Session.Query(stmt, key...)
+	q := c.Query(stmt, key...)
 	if err := q.Scan(dests...); err != nil {
 		return err
 	}
