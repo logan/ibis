@@ -71,7 +71,7 @@ func (a TableAlteration) AlterStatements() []string {
 var column_validators = map[string]string{
 	"org.apache.cassandra.db.marshal.BooleanType":   "boolean",
 	"org.apache.cassandra.db.marshal.DoubleType":    "double",
-	"org.apache.cassandra.db.marshal.LongType":      "long",
+	"org.apache.cassandra.db.marshal.LongType":      "bigint",
 	"org.apache.cassandra.db.marshal.TimestampType": "timestamp",
 	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
 }
