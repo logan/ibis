@@ -12,6 +12,7 @@ func TestDefineTable(t *testing.T) {
 		Column{Name: "C", Type: "bigint", typeInfo: &gocql.TypeInfo{Type: gocql.TypeBigInt}},
 		Column{Name: "D", Type: "varchar", typeInfo: &gocql.TypeInfo{Type: gocql.TypeVarchar}},
 		Column{Name: "E", Type: "timestamp", typeInfo: &gocql.TypeInfo{Type: gocql.TypeTimestamp}},
+		Column{Name: "F", Type: "blob", typeInfo: &gocql.TypeInfo{Type: gocql.TypeBlob}},
 	}
 	s := DefineTable(&ormTestType{}, TableOptions{})
 	if !reflect.DeepEqual(expected, s.Columns) {
@@ -20,7 +21,7 @@ func TestDefineTable(t *testing.T) {
 }
 
 func TestCreateStatement(t *testing.T) {
-	expected := "CREATE TABLE ormTestType (D varchar, C bigint, A boolean, B double, E timestamp, PRIMARY KEY (D, C, A))"
+	expected := "CREATE TABLE ormTestType (D varchar, C bigint, A boolean, B double, E timestamp, F blob, PRIMARY KEY (D, C, A))"
 	stmt := ormTestTypeTable.CreateStatement()
 	if expected != stmt {
 		t.Errorf("\nexpected: %s\nreceived: %s", expected, stmt)

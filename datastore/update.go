@@ -75,14 +75,6 @@ func (a TableAlteration) AlterStatements() []string {
 	return alts
 }
 
-var column_validators = map[string]string{
-	"org.apache.cassandra.db.marshal.BooleanType":   "boolean",
-	"org.apache.cassandra.db.marshal.DoubleType":    "double",
-	"org.apache.cassandra.db.marshal.LongType":      "bigint",
-	"org.apache.cassandra.db.marshal.TimestampType": "timestamp",
-	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
-}
-
 // GetLiveSchema builds a schema by querying the column families that exist in the connected
 // keyspace.
 func GetLiveSchema(c *CassandraConn) (*Schema, error) {

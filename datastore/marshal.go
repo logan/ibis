@@ -21,3 +21,30 @@ func (rv *RowValue) UnmarshalCQL(info *gocql.TypeInfo, data []byte) error {
 // RowValues is a map of strings to marshalled values. This represents the fields extracted from an
 // instance of a Table, or the values scanned from a CQL query.
 type RowValues map[string]RowValue
+
+var columnTypeMap = map[string]string{
+	"[]byte":    "blob",
+	"bool":      "boolean",
+	"float64":   "double",
+	"int64":     "bigint",
+	"string":    "varchar",
+	"time.Time": "timestamp",
+}
+
+var typeInfoMap = map[string]*gocql.TypeInfo{
+	"boolean":   &gocql.TypeInfo{Type: gocql.TypeBoolean},
+	"blob":      &gocql.TypeInfo{Type: gocql.TypeBlob},
+	"double":    &gocql.TypeInfo{Type: gocql.TypeDouble},
+	"bigint":    &gocql.TypeInfo{Type: gocql.TypeBigInt},
+	"varchar":   &gocql.TypeInfo{Type: gocql.TypeVarchar},
+	"timestamp": &gocql.TypeInfo{Type: gocql.TypeTimestamp},
+}
+
+var column_validators = map[string]string{
+	"org.apache.cassandra.db.marshal.BooleanType":   "boolean",
+	"org.apache.cassandra.db.marshal.BytesType":     "blob",
+	"org.apache.cassandra.db.marshal.DoubleType":    "double",
+	"org.apache.cassandra.db.marshal.LongType":      "bigint",
+	"org.apache.cassandra.db.marshal.TimestampType": "timestamp",
+	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
+}

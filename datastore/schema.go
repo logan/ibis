@@ -51,22 +51,6 @@ type Column struct {
 	typeInfo *gocql.TypeInfo
 }
 
-var columnTypeMap = map[string]string{
-	"bool":      "boolean",
-	"float64":   "double",
-	"int64":     "bigint",
-	"string":    "varchar",
-	"time.Time": "timestamp",
-}
-
-var typeInfoMap = map[string]*gocql.TypeInfo{
-	"boolean":   &gocql.TypeInfo{Type: gocql.TypeBoolean},
-	"double":    &gocql.TypeInfo{Type: gocql.TypeDouble},
-	"bigint":    &gocql.TypeInfo{Type: gocql.TypeBigInt},
-	"varchar":   &gocql.TypeInfo{Type: gocql.TypeVarchar},
-	"timestamp": &gocql.TypeInfo{Type: gocql.TypeTimestamp},
-}
-
 // TableFrom looks up a row's Table definition. Returns nil if no Table has been defined for the row's type.
 func TableFrom(row Persistable) *Table {
 	return tableCache[reflect.TypeOf(row)]
@@ -122,7 +106,11 @@ func columnFromStructField(field reflect.StructField) (Column, bool) {
 
 func goTypeToCassType(t reflect.Type) (string, bool) {
 	var type_name string
-	if t.PkgPath() == "" {
+	if t.Kind() == reflect.Slice {
+		if t.Elem().Kind() == reflect.Uint8 {
+			type_name = "[]byte"
+		}
+	} else if t.PkgPath() == "" {
 		type_name = t.Name()
 	} else {
 		type_name = t.PkgPath() + "." + t.Name()

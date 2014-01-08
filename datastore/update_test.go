@@ -17,6 +17,7 @@ func TestGetLiveSchema(t *testing.T) {
 
 	q := tc.Query(`
         CREATE TABLE test (
+            blobcol blob,
             boolcol boolean,
             float64col double,
             int64col bigint,
@@ -31,6 +32,7 @@ func TestGetLiveSchema(t *testing.T) {
 	expected := Table{
 		Name: "test",
 		Columns: []Column{
+			Column{Name: "blobcol", Type: "blob"},
 			Column{Name: "boolcol", Type: "boolean"},
 			Column{Name: "float64col", Type: "double"},
 			Column{Name: "int64col", Type: "bigint"},

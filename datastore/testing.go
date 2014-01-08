@@ -20,6 +20,7 @@ type ormTestType struct {
 	C int64
 	D string
 	E time.Time
+	F []byte
 }
 
 var ormTestTypeTableOptions = TableOptions{PrimaryKey: []string{"D", "C", "A"}}
