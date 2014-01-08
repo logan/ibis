@@ -4,6 +4,8 @@ import "fmt"
 import "reflect"
 import "strings"
 
+import "tux21b.org/v1/gocql"
+
 // Schema is a collection of Table (column family) definitions.
 type Schema struct {
 	Tables map[string]*Table
@@ -44,8 +46,9 @@ type TableOptions struct {
 // A Column gives the name and data type of a Cassandra column. The value of type should be a CQL
 // data type (e.g. bigint, varchar, double).
 type Column struct {
-	Name string
-	Type string
+	Name     string
+	Type     string
+	typeInfo *gocql.TypeInfo
 }
 
 var columnTypeMap = map[string]string{
@@ -54,6 +57,14 @@ var columnTypeMap = map[string]string{
 	"int64":     "bigint",
 	"string":    "varchar",
 	"time.Time": "timestamp",
+}
+
+var typeInfoMap = map[string]*gocql.TypeInfo{
+	"boolean":   &gocql.TypeInfo{Type: gocql.TypeBoolean},
+	"double":    &gocql.TypeInfo{Type: gocql.TypeDouble},
+	"bigint":    &gocql.TypeInfo{Type: gocql.TypeBigInt},
+	"varchar":   &gocql.TypeInfo{Type: gocql.TypeVarchar},
+	"timestamp": &gocql.TypeInfo{Type: gocql.TypeTimestamp},
 }
 
 // TableFrom looks up a row's Table definition. Returns nil if no Table has been defined for the row's type.
@@ -74,12 +85,29 @@ func DefineTable(row Persistable, options TableOptions) *Table {
 	if row_type.Kind() != reflect.Struct {
 		panic("row must be pointer to struct")
 	}
-	table := &Table{row_type.Name(), make([]Column, 0, row_type.NumField()), options}
+
+	cols := make(map[string]Column)
 	for i := 0; i < row_type.NumField(); i++ {
-		if column, ok := columnFromStructField(row_type.Field(i)); ok {
-			table.Columns = append(table.Columns, column)
+		if col, ok := columnFromStructField(row_type.Field(i)); ok {
+			cols[col.Name] = col
 		}
 	}
+
+	table := &Table{row_type.Name(), make([]Column, 0, len(cols)), options}
+
+	// primary key columns must come first and in order
+	for _, pk_name := range options.PrimaryKey {
+		col, ok := cols[pk_name]
+		if !ok {
+			panic(fmt.Sprintf("primary key refers to invalid column (%s)", pk_name))
+		}
+		table.Columns = append(table.Columns, col)
+		delete(cols, pk_name)
+	}
+	for _, col := range cols {
+		table.Columns = append(table.Columns, col)
+	}
+
 	tableCache[ptr_type] = table
 	return table
 }
@@ -87,7 +115,7 @@ func DefineTable(row Persistable, options TableOptions) *Table {
 func columnFromStructField(field reflect.StructField) (Column, bool) {
 	ts, ok := goTypeToCassType(field.Type)
 	if ok {
-		return Column{field.Name, ts}, true
+		return Column{field.Name, ts, typeInfoMap[ts]}, true
 	}
 	return Column{}, ok
 }

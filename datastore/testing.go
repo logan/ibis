@@ -1,13 +1,35 @@
 package datastore
 
+import "bytes"
 import "flag"
 import "fmt"
+import "reflect"
 import "strings"
+import "testing"
+import "time"
 
 var (
 	flagCluster  = flag.String("cluster", "localhost", "cassandra nodes given as comma-separated host:port pairs")
 	flagKeyspace = flag.String("keyspace", "creative_test", "name of throwaway keyspace for testing")
 )
+
+type ormTestType struct {
+	Persistent
+	A bool
+	B float64
+	C int64
+	D string
+	E time.Time
+}
+
+var ormTestTypeTableOptions = TableOptions{PrimaryKey: []string{"D", "C", "A"}}
+var ormTestTypeTable = DefineTable(&ormTestType{}, ormTestTypeTableOptions)
+
+var testModel = NewSchema()
+
+func init() {
+	testModel.AddTable(ormTestTypeTable)
+}
 
 // A TestConn extends CassandraConn to manage throwaway keyspaces. This guarantees tests a pristine
 // environment before interacting with Cassandra.
@@ -16,23 +38,23 @@ type TestConn struct {
 }
 
 // NewTestConn connects to Cassandra and establishes an empty keyspace to operate in.
-func NewTestConn() (*TestConn, error) {
+func NewTestConn(t *testing.T) *TestConn {
 	config := CassandraConfig{
 		Node:        strings.Split(*flagCluster, ","),
 		Keyspace:    "system",
 		Consistency: "one",
 	}
 	if err := initKeyspace(config); err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
 	config.Keyspace = *flagKeyspace
 	c, err := DialCassandra(config)
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
-	return &TestConn{c}, nil
+	return &TestConn{c}
 }
 
 func initKeyspace(config CassandraConfig) error {
@@ -59,4 +81,35 @@ func (tc *TestConn) Close() error {
 	}
 	tc.Session.Close()
 	return nil
+}
+
+func rowsEqual(row1 Persistable, row2 Persistable) bool {
+	type1 := reflect.TypeOf(row1)
+	if type1 != reflect.TypeOf(row2) {
+		return false
+	}
+	table, ok := tableCache[type1]
+	if !ok {
+		return false
+	}
+	p1 := reflect.ValueOf(row1).Elem().FieldByName("Persistent").Interface().(Persistent)
+	p2 := reflect.ValueOf(row2).Elem().FieldByName("Persistent").Interface().(Persistent)
+	if len(p1._loadedColumns) != len(p2._loadedColumns) {
+		return false
+	}
+	for k, v1 := range p1._loadedColumns {
+		v2, ok := p2._loadedColumns[k]
+		if !ok || !bytes.Equal(v1.Value, v2.Value) {
+			return false
+		}
+	}
+	rv1, err := getColumnValues(table, row1)
+	if err != nil {
+		return false
+	}
+	rv2, err := getColumnValues(table, row2)
+	if err != nil {
+		return false
+	}
+	return reflect.DeepEqual(rv1, rv2)
 }

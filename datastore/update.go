@@ -101,7 +101,7 @@ func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 	i := q.Iter()
 	var cf_name, col_name, validator string
 	for i.Scan(&cf_name, &col_name, &validator) {
-		col := Column{col_name, typeFromValidator(validator)}
+		col := Column{Name: col_name, Type: typeFromValidator(validator)}
 		t := schema.Tables[cf_name]
 		t.Columns = append(t.Columns, col)
 	}
