@@ -71,7 +71,7 @@ func TestDiffLiveSchema(t *testing.T) {
 				Name: "T1",
 				Columns: []Column{
 					Column{Name: "A", Type: "varchar"},
-					Column{Name: "B", Type: "boolean"},
+					Column{Name: "B", Type: "varchar"},
 				},
 				Options: TableOptions{PrimaryKey: []string{"A"}},
 			},
@@ -91,7 +91,9 @@ func TestDiffLiveSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	model.Tables["T1"].Columns[1].Type = "bigint"
+	model.Tables["T1"].Columns[1].Type = "blob"
+	model.Tables["T1"].Columns = append(model.Tables["T1"].Columns,
+		Column{Name: "C", Type: "bigint"})
 	model.Tables["T2"] = &Table{
 		Name:    "T2",
 		Columns: []Column{Column{Name: "X", Type: "varchar"}},
@@ -113,5 +115,16 @@ func TestDiffLiveSchema(t *testing.T) {
 	}
 	if expected.String() != diff.String() {
 		t.Errorf("\nexpected: %s\nreceived: %s", expected, diff)
+	}
+
+	if err = diff.Apply(tc.Session); err != nil {
+		t.Fatal(err)
+	}
+	diff, err = DiffLiveSchema(tc.CassandraConn, &Schema{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff.Size() != 0 {
+		t.Error("expected empty diff")
 	}
 }
