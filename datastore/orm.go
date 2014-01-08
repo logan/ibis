@@ -1,16 +1,14 @@
 package datastore
 
-import "bytes"
 import "errors"
 import "fmt"
 import "reflect"
 import "strings"
 
-import "tux21b.org/v1/gocql"
-
 var (
-	ErrNotFound      = errors.New("not found")
-	ErrAlreadyExists = errors.New("already exists")
+	ErrNotFound           = errors.New("not found")
+	ErrAlreadyExists      = errors.New("already exists")
+	ErrTableNotAssociated = errors.New("no table associated with this type of row")
 )
 
 var tableCache = make(map[reflect.Type]*Table)
@@ -111,37 +109,45 @@ func (orm *Orm) Commit(row Persistable) error {
 	return orm.commit(row, false)
 }
 
-func (orm *Orm) commit(row Persistable, ifnotexists bool) error {
+func (orm *Orm) commit(row Persistable, cas bool) error {
 	ptr_type := reflect.TypeOf(row)
 	table, ok := tableCache[ptr_type]
 	if !ok {
-		return errors.New(fmt.Sprintf("no table registered for type %v", ptr_type))
+		return ErrTableNotAssociated
 	}
-	newk, newv, err := getColumnsToCommit(table, row)
+	row_values, err := MarshalRow(row)
 	if err != nil {
 		return err
 	}
+	loadedColumns := row.loadedColumns()
+	row_values.subtractUnchanged(loadedColumns)
+	newk := make([]string, 0, len(row_values))
+	newv := make([]*RowValue, 0, len(row_values))
+	for k, v := range row_values {
+		newk = append(newk, k)
+		newv = append(newv, v)
+	}
 	if len(newk) == 0 {
+		// nothing to commit
 		return nil
 	}
-	var ifne string
-	if ifnotexists {
-		ifne = " IF NOT EXISTS"
-	}
-	loadedColumns := row.loadedColumns()
-	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)%s",
-		table.Name, strings.Join(newk, ", "), placeholderList(len(newk)), ifne)
+
+	stmt := buildInsertQuery(table, newk, cas)
 	params := make([]interface{}, len(newv))
 	for i, v := range newv {
 		params[i] = v
 	}
 	q := orm.Query(stmt, params...)
-	if ifnotexists {
-		savedi := make([]interface{}, len(newk))
+
+	if cas {
+		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
+		// indicating success, and a row with the values that were committed. We don't need this
+		// response, but we need to supply RowValue pointers for the returned columns anyway.
+		interfaces := make([]interface{}, len(newk))
 		for i, _ := range newk {
-			savedi[i] = &RowValue{}
+			interfaces[i] = &RowValue{}
 		}
-		if applied, err := q.ScanCAS(savedi...); !applied || err != nil {
+		if applied, err := q.ScanCAS(interfaces...); !applied || err != nil {
 			if err == nil {
 				err = ErrAlreadyExists
 			}
@@ -152,80 +158,48 @@ func (orm *Orm) commit(row Persistable, ifnotexists bool) error {
 			return err
 		}
 	}
+
 	for i, col := range newk {
 		loadedColumns[col] = newv[i]
 	}
 	return nil
 }
 
-func getColumnsToCommit(table *Table, row Persistable) (newk []string, newv []RowValue, err error) {
-	values, err := getColumnValues(table, row)
-	if err != nil {
-		return
+func buildInsertQuery(table *Table, colnames []string, cas bool) string {
+	var cas_term string
+	if cas {
+		cas_term = " IF NOT EXISTS"
 	}
-	newk = make([]string, 0, len(values))
-	newv = make([]RowValue, 0, len(values))
-	loadedColumns := row.loadedColumns()
-	for col, rowval := range values {
-		orig, ok := loadedColumns[col]
-		if !ok || !bytes.Equal(orig.Value, rowval.Value) {
-			newk = append(newk, col)
-			newv = append(newv, rowval)
-		}
-	}
-	return
-}
-
-func getColumnValues(table *Table, row Persistable) (result RowValues, err error) {
-	result = make(RowValues)
-	value := reflect.Indirect(reflect.ValueOf(row))
-	for _, col := range table.Columns {
-		fieldv := value.FieldByName(col.Name)
-		if fieldv.IsValid() {
-			var b []byte
-			b, err = gocql.Marshal(col.typeInfo, fieldv.Interface())
-			if err != nil {
-				return
-			}
-			result[col.Name] = RowValue{b, col.typeInfo}
-		}
-	}
-	return
+	colname_list := strings.Join(colnames, ", ")
+	placeholders := placeholderList(len(colnames))
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)%s", table.Name, colname_list, placeholders, cas_term)
 }
 
 // LoadByKey loads data from a row's column family into that row. The row is selected by the given
 // key values, which must correspond to the column family's defined primary key.
 func (orm *Orm) LoadByKey(row Persistable, key ...interface{}) error {
 	ptr_type := reflect.TypeOf(row)
-	row_value := reflect.ValueOf(row).Elem()
-	table := tableCache[ptr_type]
-	pkdef := table.Options.PrimaryKey
-	cols := make([]string, len(table.Columns))
-	types := make([]*gocql.TypeInfo, len(table.Columns))
-	for i, col := range table.Columns {
-		cols[i] = col.Name
-		types[i] = col.typeInfo
+	table, ok := tableCache[ptr_type]
+	if !ok {
+		return ErrTableNotAssociated
 	}
+
+	colnames := make([]string, len(table.Columns))
+	for i, col := range table.Columns {
+		colnames[i] = col.Name
+	}
+
+	pkdef := table.Options.PrimaryKey
 	rules := make([]string, len(pkdef))
 	for i, k := range pkdef {
 		rules[i] = fmt.Sprintf("%s = ?", k)
 	}
-	dests := make([]RowValue, len(table.Columns))
-	destsi := make([]interface{}, len(table.Columns))
-	for i, _ := range table.Columns {
-		dests[i] = RowValue{}
-		destsi[i] = &dests[i]
-	}
+
 	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
-		strings.Join(cols, ", "), table.Name, strings.Join(rules, " AND "))
+		strings.Join(colnames, ", "), table.Name, strings.Join(rules, " AND "))
 	q := orm.Query(stmt, key...)
-	if err := q.Scan(destsi...); err != nil {
+	if err := q.Scan(row.loadedColumns().receiverInterfaces(colnames)...); err != nil {
 		return err
 	}
-	loadedColumns := row.loadedColumns()
-	for i, v := range dests {
-		loadedColumns[cols[i]] = v
-		gocql.Unmarshal(v.TypeInfo, v.Value, row_value.FieldByName(cols[i]).Addr().Interface())
-	}
-	return nil
+	return row.loadedColumns().UnmarshalRow(row)
 }

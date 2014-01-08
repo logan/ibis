@@ -89,10 +89,6 @@ func rowsEqual(row1 Persistable, row2 Persistable) bool {
 	if type1 != reflect.TypeOf(row2) {
 		return false
 	}
-	table, ok := tableCache[type1]
-	if !ok {
-		return false
-	}
 	p1 := reflect.ValueOf(row1).Elem().FieldByName("Persistent").Interface().(Persistent)
 	p2 := reflect.ValueOf(row2).Elem().FieldByName("Persistent").Interface().(Persistent)
 	if len(p1._loadedColumns) != len(p2._loadedColumns) {
@@ -104,11 +100,11 @@ func rowsEqual(row1 Persistable, row2 Persistable) bool {
 			return false
 		}
 	}
-	rv1, err := getColumnValues(table, row1)
+	rv1, err := MarshalRow(row1)
 	if err != nil {
 		return false
 	}
-	rv2, err := getColumnValues(table, row2)
+	rv2, err := MarshalRow(row2)
 	if err != nil {
 		return false
 	}
