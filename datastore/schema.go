@@ -19,13 +19,17 @@ func NewSchema() *Schema {
 // AddTable adds a table definition to the schema.
 func (s *Schema) AddTable(table *Table) {
 	s.Tables[strings.ToLower(table.Name)] = table
+	if table.seqIDTable != nil {
+		s.Tables[table.seqIDTable.Name] = table.seqIDTable
+	}
 }
 
 // A Table describes a column family in Cassandra.
 type Table struct {
-	Name    string       // The name of the column family.
-	Columns []Column     // The definition of the column family's columns.
-	Options TableOptions // Options for the column family, such as primary key.
+	Name       string       // The name of the column family.
+	Columns    []Column     // The definition of the column family's columns.
+	Options    TableOptions // Options for the column family, such as primary key.
+	seqIDTable *Table
 }
 
 // CreateStatement returns the CQL statement that would create this table.
@@ -38,9 +42,13 @@ func (t Table) CreateStatement() string {
 		t.Name, strings.Join(cols, ", "), strings.Join(t.Options.PrimaryKey, ", "))
 }
 
+type OnCreateHook func(*Orm, *Table) error
+
 // TableOptions is used to provide additional properties for a column family definition.
 type TableOptions struct {
-	PrimaryKey []string // Required. The list of columns comprising the primary key. The first column defines partitions.
+	PrimaryKey   []string     // Required. The list of columns comprising the primary key. The first column defines partitions.
+	IndexBySeqID bool         // If true, maintain a secondary index of rows by SeqID.
+	OnCreate     OnCreateHook // If given, will be called immediately after table creation.
 }
 
 // A Column gives the name and data type of a Cassandra column. The value of type should be a CQL
@@ -70,30 +78,49 @@ func DefineTable(row Persistable, options TableOptions) *Table {
 		panic("row must be pointer to struct")
 	}
 
-	cols := make(map[string]Column)
-	for i := 0; i < row_type.NumField(); i++ {
-		if col, ok := columnFromStructField(row_type.Field(i)); ok {
-			cols[col.Name] = col
-		}
+	colmap := make(map[string]Column)
+	for _, col := range columnsFromStructType(row_type) {
+		colmap[col.Name] = col
 	}
 
-	table := &Table{row_type.Name(), make([]Column, 0, len(cols)), options}
+	table := &Table{
+		Name:    row_type.Name(),
+		Columns: make([]Column, 0, len(colmap)),
+		Options: options,
+	}
 
 	// primary key columns must come first and in order
 	for _, pk_name := range options.PrimaryKey {
-		col, ok := cols[pk_name]
+		col, ok := colmap[pk_name]
 		if !ok {
 			panic(fmt.Sprintf("primary key refers to invalid column (%s)", pk_name))
 		}
 		table.Columns = append(table.Columns, col)
-		delete(cols, pk_name)
+		delete(colmap, pk_name)
 	}
-	for _, col := range cols {
+	for _, col := range colmap {
 		table.Columns = append(table.Columns, col)
 	}
 
 	tableCache[ptr_type] = table
+
+	if options.IndexBySeqID {
+		table.seqIDTable = SeqIDListingTable(table)
+	}
 	return table
+}
+
+func columnsFromStructType(struct_type reflect.Type) []Column {
+	cols := make([]Column, 0, struct_type.NumField())
+	for i := 0; i < struct_type.NumField(); i++ {
+		field := struct_type.Field(i)
+		if col, ok := columnFromStructField(field); ok {
+			cols = append(cols, col)
+		} else if field.Type.Kind() == reflect.Struct {
+			cols = append(cols, columnsFromStructType(field.Type)...)
+		}
+	}
+	return cols
 }
 
 func columnFromStructField(field reflect.StructField) (Column, bool) {

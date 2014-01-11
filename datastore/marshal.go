@@ -49,9 +49,10 @@ func (rv RowValues) receiverInterfaces(keys []string) []interface{} {
 }
 
 var columnTypeMap = map[string]string{
-	"[]byte":    "blob",
-	"bool":      "boolean",
-	"float64":   "double",
+	"[]byte":  "blob",
+	"bool":    "boolean",
+	"float64": "double",
+	"github.com/logan/creative/datastore.SeqID": "varchar",
 	"int64":     "bigint",
 	"string":    "varchar",
 	"time.Time": "timestamp",

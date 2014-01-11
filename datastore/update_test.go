@@ -54,10 +54,10 @@ func TestGetLiveSchema(t *testing.T) {
 }
 
 func TestDiffLiveSchema(t *testing.T) {
-	tc := NewTestConn(t)
-	defer tc.Close()
+	orm := NewTestOrm(t)
+	defer orm.Close()
 
-	diff, err := DiffLiveSchema(tc.CassandraConn, &Schema{})
+	diff, err := DiffLiveSchema(orm.TestConn.CassandraConn, &Schema{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestDiffLiveSchema(t *testing.T) {
 	}
 
 	expected := &SchemaDiff{Creations: []*Table{model.Tables["T1"]}}
-	diff, err = DiffLiveSchema(tc.CassandraConn, model)
+	diff, err = DiffLiveSchema(orm.TestConn.CassandraConn, model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestDiffLiveSchema(t *testing.T) {
 		t.Errorf("\nexpected: %s\nreceived: %s", expected, diff)
 	}
 
-	if err = diff.Apply(tc.Session); err != nil {
+	if err = diff.Apply(orm.Orm); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +109,7 @@ func TestDiffLiveSchema(t *testing.T) {
 			},
 		},
 	}
-	diff, err = DiffLiveSchema(tc.CassandraConn, model)
+	diff, err = DiffLiveSchema(orm.TestConn.CassandraConn, model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,10 +117,10 @@ func TestDiffLiveSchema(t *testing.T) {
 		t.Errorf("\nexpected: %s\nreceived: %s", expected, diff)
 	}
 
-	if err = diff.Apply(tc.Session); err != nil {
+	if err = diff.Apply(orm.Orm); err != nil {
 		t.Fatal(err)
 	}
-	diff, err = DiffLiveSchema(tc.CassandraConn, &Schema{})
+	diff, err = DiffLiveSchema(orm.TestConn.CassandraConn, &Schema{})
 	if err != nil {
 		t.Fatal(err)
 	}

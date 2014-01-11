@@ -5,6 +5,8 @@ import "fmt"
 import "reflect"
 import "strings"
 
+import "tux21b.org/v1/gocql"
+
 var (
 	ErrNotFound           = errors.New("not found")
 	ErrAlreadyExists      = errors.New("already exists")
@@ -56,6 +58,7 @@ type Orm struct {
 	*CassandraConn
 	Model         *Schema     // The tables (column families) to use in this keyspace.
 	SchemaUpdates *SchemaDiff // The differences found between the existing column families and the given Model.
+	SeqID         *SeqIDGenerator
 }
 
 // DialOrm establishes a connection to Cassandra and returns an Orm pointer for storing and loading
@@ -67,7 +70,14 @@ func DialOrm(config CassandraConfig, model *Schema) (*Orm, error) {
 	}
 	orm := &Orm{CassandraConn: conn, Model: model}
 	orm.SchemaUpdates, err = DiffLiveSchema(conn, model)
-	return orm, err
+	if err != nil {
+		return nil, err
+	}
+	orm.SeqID, err = NewSeqIDGenerator()
+	if err != nil {
+		return nil, err
+	}
+	return orm, nil
 }
 
 // RequiresUpdates returns true if the Orm model differs from the existing column families in
@@ -78,7 +88,7 @@ func (orm *Orm) RequiresUpdates() bool {
 
 // ApplySchemaUpdates applies any required modifications to the live schema to match the Orm model.
 func (orm *Orm) ApplySchemaUpdates() error {
-	return orm.SchemaUpdates.Apply(orm.Session)
+	return orm.SchemaUpdates.Apply(orm)
 }
 
 var placeholderListString string
@@ -119,6 +129,20 @@ func (orm *Orm) commit(row Persistable, cas bool) error {
 	if err != nil {
 		return err
 	}
+	var seqid *SeqID
+	if table.Options.IndexBySeqID {
+		s, err := orm.SeqID.New()
+		if err != nil {
+			return err
+		}
+		seqid = &s
+		ti := &gocql.TypeInfo{Type: gocql.TypeVarchar}
+		b, err := gocql.Marshal(ti, string(s))
+		if err != nil {
+			return err
+		}
+		row_values["SeqID"] = &RowValue{b, ti}
+	}
 	loadedColumns := row.loadedColumns()
 	row_values.subtractUnchanged(loadedColumns)
 	newk := make([]string, 0, len(row_values))
@@ -132,13 +156,13 @@ func (orm *Orm) commit(row Persistable, cas bool) error {
 		return nil
 	}
 
-	stmt := buildInsertQuery(table, newk, cas)
+	stmt := buildInsertStatement(table, newk, cas)
 	params := make([]interface{}, len(newv))
 	for i, v := range newv {
 		params[i] = v
 	}
-	q := orm.Query(stmt, params...)
 
+	q := orm.Query(stmt, params...)
 	if cas {
 		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
 		// indicating success, and a row with the values that were committed. We don't need this
@@ -158,14 +182,18 @@ func (orm *Orm) commit(row Persistable, cas bool) error {
 			return err
 		}
 	}
-
 	for i, col := range newk {
 		loadedColumns[col] = newv[i]
+	}
+	if table.Options.IndexBySeqID {
+		if err = addToSeqIDListing(orm, table, *seqid, row_values); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func buildInsertQuery(table *Table, colnames []string, cas bool) string {
+func buildInsertStatement(table *Table, colnames []string, cas bool) string {
 	var cas_term string
 	if cas {
 		cas_term = " IF NOT EXISTS"

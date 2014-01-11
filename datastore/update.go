@@ -33,15 +33,20 @@ func (d *SchemaDiff) String() string {
 }
 
 // Apply issues CQL statements to transform the former schema into the latter.
-func (d *SchemaDiff) Apply(session *gocql.Session) error {
+func (d *SchemaDiff) Apply(orm *Orm) error {
 	for _, t := range d.Creations {
-		if err := session.Query(t.CreateStatement()).Exec(); err != nil {
+		if err := orm.Query(t.CreateStatement()).Exec(); err != nil {
 			return err
+		}
+		if t.Options.OnCreate != nil {
+			if err := t.Options.OnCreate(orm, t); err != nil {
+				return err
+			}
 		}
 	}
 	for _, a := range d.Alterations {
 		for _, s := range a.AlterStatements() {
-			if err := session.Query(s).Exec(); err != nil {
+			if err := orm.Query(s).Exec(); err != nil {
 				return err
 			}
 		}
@@ -108,8 +113,8 @@ func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*Table, e
 	var cf_name, key_aliases, column_aliases string
 	i := q.Iter()
 	for i.Scan(&cf_name, &key_aliases, &column_aliases) {
-		o := TableOptions{keyFromAliases(key_aliases, column_aliases)}
-		t := Table{cf_name, make([]Column, 0, 16), o}
+		o := TableOptions{PrimaryKey: keyFromAliases(key_aliases, column_aliases)}
+		t := Table{Name: cf_name, Columns: make([]Column, 0, 16), Options: o}
 		tables = append(tables, &t)
 	}
 	return tables, i.Close()
