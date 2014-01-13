@@ -21,7 +21,7 @@ func TestDefineTable(t *testing.T) {
 }
 
 func TestCreateStatement(t *testing.T) {
-	expected := "CREATE TABLE ormTestType (D varchar, C bigint, A boolean, B double, E timestamp, F blob, PRIMARY KEY (D, C, A))"
+	expected := "CREATE TABLE ormTestType (D varchar, C bigint, A boolean, B double, E timestamp, F blob, PRIMARY KEY (D, C, A)) WITH comment='1'"
 	stmt := ormTestTypeTable.CreateStatement()
 	if expected != stmt {
 		t.Errorf("\nexpected: %s\nreceived: %s", expected, stmt)

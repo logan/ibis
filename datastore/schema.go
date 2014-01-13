@@ -8,12 +8,13 @@ import "tux21b.org/v1/gocql"
 
 // Schema is a collection of Table (column family) definitions.
 type Schema struct {
-	Tables map[string]*Table
+	Tables     map[string]*Table
+	nextTypeID int
 }
 
 // NewSchema returns a new, empty schema.
 func NewSchema() *Schema {
-	return &Schema{make(map[string]*Table)}
+	return &Schema{Tables: make(map[string]*Table)}
 }
 
 // AddTable adds a table definition to the schema.
@@ -21,6 +22,10 @@ func (s *Schema) AddTable(table *Table) {
 	s.Tables[strings.ToLower(table.Name)] = table
 	if table.seqIDTable != nil {
 		s.Tables[table.seqIDTable.Name] = table.seqIDTable
+	}
+	if table.Options.typeID == 0 {
+		table.Options.typeID = s.nextTypeID
+		s.nextTypeID++
 	}
 }
 
@@ -38,8 +43,12 @@ func (t Table) CreateStatement() string {
 	for i, col := range t.Columns {
 		cols[i] = fmt.Sprintf("%s %s", col.Name, col.Type)
 	}
-	return fmt.Sprintf("CREATE TABLE %s (%s, PRIMARY KEY (%s))",
-		t.Name, strings.Join(cols, ", "), strings.Join(t.Options.PrimaryKey, ", "))
+	var options string
+	if t.Options.typeID != 0 {
+		options = fmt.Sprintf(" WITH comment='%d'", t.Options.typeID)
+	}
+	return fmt.Sprintf("CREATE TABLE %s (%s, PRIMARY KEY (%s))%s",
+		t.Name, strings.Join(cols, ", "), strings.Join(t.Options.PrimaryKey, ", "), options)
 }
 
 type OnCreateHook func(*Orm, *Table) error
@@ -49,6 +58,7 @@ type TableOptions struct {
 	PrimaryKey   []string     // Required. The list of columns comprising the primary key. The first column defines partitions.
 	IndexBySeqID bool         // If true, maintain a secondary index of rows by SeqID.
 	OnCreate     OnCreateHook // If given, will be called immediately after table creation.
+	typeID       int
 }
 
 // A Column gives the name and data type of a Cassandra column. The value of type should be a CQL

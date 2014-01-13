@@ -2,6 +2,7 @@ package datastore
 
 import "encoding/json"
 import "fmt"
+import "strconv"
 import "strings"
 
 import "tux21b.org/v1/gocql"
@@ -83,11 +84,14 @@ func (a TableAlteration) AlterStatements() []string {
 // GetLiveSchema builds a schema by querying the column families that exist in the connected
 // keyspace.
 func GetLiveSchema(c *CassandraConn) (*Schema, error) {
-	schema := Schema{make(map[string]*Table)}
 	var err error
-	tables, err := getLiveColumnFamilies(c.Session, c.Config.Keyspace)
+	tables, nextTypeID, err := getLiveColumnFamilies(c.Session, c.Config.Keyspace)
 	if err != nil {
 		return nil, err
+	}
+	schema := Schema{
+		Tables:     make(map[string]*Table),
+		nextTypeID: nextTypeID,
 	}
 	for _, t := range tables {
 		schema.Tables[strings.ToLower(t.Name)] = t
@@ -105,19 +109,34 @@ func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 	return &schema, i.Close()
 }
 
-func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*Table, error) {
+func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*Table, int, error) {
 	q := session.Query(
-		`SELECT columnfamily_name, key_aliases, column_aliases FROM system.schema_columnfamilies
-             WHERE keyspace_name = ?`, keyspace)
+		`SELECT columnfamily_name, key_aliases, column_aliases, comment
+             FROM system.schema_columnfamilies WHERE keyspace_name = ?`, keyspace)
 	tables := make([]*Table, 0, 32)
-	var cf_name, key_aliases, column_aliases string
+	var cf_name, key_aliases, column_aliases, comment string
+	maxTypeID := 0
 	i := q.Iter()
-	for i.Scan(&cf_name, &key_aliases, &column_aliases) {
-		o := TableOptions{PrimaryKey: keyFromAliases(key_aliases, column_aliases)}
+	for i.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
+		o := TableOptions{
+			PrimaryKey: keyFromAliases(key_aliases, column_aliases),
+			typeID:     typeIDFromComment(comment),
+		}
+		if o.typeID > maxTypeID {
+			maxTypeID = o.typeID
+		}
 		t := Table{Name: cf_name, Columns: make([]Column, 0, 16), Options: o}
 		tables = append(tables, &t)
 	}
-	return tables, i.Close()
+	return tables, maxTypeID + 1, i.Close()
+}
+
+func typeIDFromComment(comment string) int {
+	i, err := strconv.Atoi(comment)
+	if err != nil {
+		return 0
+	}
+	return i
 }
 
 func typeFromValidator(validator string) string {
@@ -141,11 +160,21 @@ func keyFromAliases(key_aliases, column_aliases string) []string {
 // DiffLiveSchema compares the current schema in Cassandra to the given model. It returns a pointer
 // to a SchemaDiff describing the differences. If the two schemas are identical, then this
 // SchemaDiff will be empty.
+//
+// This function also modifies the given model, to fix typeIDs of tables that exist in Cassandra.
 func DiffLiveSchema(c *CassandraConn, model *Schema) (*SchemaDiff, error) {
 	var live *Schema
 	var err error
 	if live, err = GetLiveSchema(c); err != nil {
 		return nil, err
+	}
+	for _, t := range live.Tables {
+		if t.Options.typeID >= model.nextTypeID {
+			model.nextTypeID = t.Options.typeID + 1
+		}
+		if model_t, ok := model.Tables[t.Name]; ok {
+			model_t.Options.typeID = t.Options.typeID
+		}
 	}
 	var diff = &SchemaDiff{make([]*Table, 0), make([]TableAlteration, 0)}
 	for name, model_table := range model.Tables {
@@ -170,6 +199,8 @@ func DiffLiveSchema(c *CassandraConn, model *Schema) (*SchemaDiff, error) {
 				diff.Alterations = append(diff.Alterations, alteration)
 			}
 		} else {
+			model_table.Options.typeID = model.nextTypeID
+			model.nextTypeID++
 			diff.Creations = append(diff.Creations, model_table)
 		}
 	}
