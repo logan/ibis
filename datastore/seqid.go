@@ -5,6 +5,12 @@ import "time"
 
 import "github.com/sdming/gosnow"
 
+var Epoch = time.Date(2014, 1, 0, 0, 0, 0, 0, time.UTC)
+
+func init() {
+	gosnow.Since = Epoch.UnixNano() / 1000000
+}
+
 type SeqID string
 
 type SeqIDGenerator struct {
