@@ -231,3 +231,26 @@ func (orm *Orm) LoadByKey(row Persistable, key ...interface{}) error {
 	}
 	return row.loadedColumns().UnmarshalRow(row)
 }
+
+// Exists checks if a row exists in a given row's column family.
+func (orm *Orm) Exists(row Persistable, key ...interface{}) (bool, error) {
+	ptr_type := reflect.TypeOf(row)
+	table, ok := tableCache[ptr_type]
+	if !ok {
+		return false, ErrTableNotAssociated
+	}
+	pkdef := table.Options.PrimaryKey
+	rules := make([]string, len(pkdef))
+	for i, k := range pkdef {
+		rules[i] = fmt.Sprintf("%s = ?", k)
+	}
+
+	stmt := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s",
+		table.Name, strings.Join(rules, " AND "))
+	q := orm.Query(stmt, key...)
+	var count int
+	if err := q.Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
