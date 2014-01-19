@@ -13,7 +13,7 @@ var (
 	flagKeyspace = flag.String("keyspace", "creative_test", "name of throwaway keyspace for testing")
 )
 
-type ormTestType struct {
+type BagOfManyTypes struct {
 	Persistent
 	A bool
 	B float64
@@ -23,13 +23,20 @@ type ormTestType struct {
 	F []byte
 }
 
-var ormTestTypeTableOptions = TableOptions{PrimaryKey: []string{"D", "C", "A"}}
-var ormTestTypeTable = DefineTable(&ormTestType{}, ormTestTypeTableOptions)
+type BagOfManyTypesTable ColumnFamily
 
-var testModel = NewSchema()
+func (t *BagOfManyTypesTable) NewRow() Persistable {
+	row := &BagOfManyTypes{}
+	row.CF = (*ColumnFamily)(t)
+	return row
+}
 
-func init() {
-	testModel.AddTable(ormTestTypeTable)
+func (t *BagOfManyTypesTable) ConfigureCF(options *CFOptions) {
+	options.PrimaryKey = []string{"D", "C", "A"}
+}
+
+type TestModel struct {
+	Bags *BagOfManyTypesTable
 }
 
 // A TestConn extends CassandraConn to manage throwaway keyspaces. This guarantees tests a pristine

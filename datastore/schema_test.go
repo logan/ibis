@@ -3,26 +3,35 @@ package datastore
 import "reflect"
 import "testing"
 
-import "tux21b.org/v1/gocql"
-
-func TestDefineTable(t *testing.T) {
-	expected := []Column{
-		Column{Name: "A", Type: "boolean", typeInfo: &gocql.TypeInfo{Type: gocql.TypeBoolean}},
-		Column{Name: "B", Type: "double", typeInfo: &gocql.TypeInfo{Type: gocql.TypeDouble}},
-		Column{Name: "C", Type: "bigint", typeInfo: &gocql.TypeInfo{Type: gocql.TypeBigInt}},
-		Column{Name: "D", Type: "varchar", typeInfo: &gocql.TypeInfo{Type: gocql.TypeVarchar}},
-		Column{Name: "E", Type: "timestamp", typeInfo: &gocql.TypeInfo{Type: gocql.TypeTimestamp}},
-		Column{Name: "F", Type: "blob", typeInfo: &gocql.TypeInfo{Type: gocql.TypeBlob}},
+func TestReflectSchemaFrom(t *testing.T) {
+	expected := ColumnFamily{
+		Name: "bags",
+		Columns: []Column{
+			Column{Name: "D", Type: "varchar", typeInfo: tiVarchar},
+			Column{Name: "C", Type: "bigint", typeInfo: tiBigInt},
+			Column{Name: "A", Type: "boolean", typeInfo: tiBoolean},
+			Column{Name: "B", Type: "double", typeInfo: tiDouble},
+			Column{Name: "E", Type: "timestamp", typeInfo: tiTimestamp},
+			Column{Name: "F", Type: "blob", typeInfo: tiBlob},
+		},
 	}
-	s := DefineTable(&ormTestType{}, TableOptions{})
-	if !reflect.DeepEqual(expected, s.Columns) {
-		t.Errorf("expected %+v, got %+v", expected, s)
+	bomtt := &BagOfManyTypesTable{}
+	bomtt.ConfigureCF(&expected.Options)
+	expected.Options.typeID = 1
+
+	model := &TestModel{}
+	schema := ReflectSchemaFrom(model)
+	if !reflect.DeepEqual(expected.Columns, schema.CFs["bags"].Columns) {
+		t.Errorf("\nexpected: %+v\nreceived: %+v", expected, *schema.CFs["bags"])
 	}
 }
 
 func TestCreateStatement(t *testing.T) {
-	expected := "CREATE TABLE ormTestType (D varchar, C bigint, A boolean, B double, E timestamp, F blob, PRIMARY KEY (D, C, A)) WITH comment='1'"
-	stmt := ormTestTypeTable.CreateStatement()
+	model := &TestModel{}
+	ReflectSchemaFrom(model)
+
+	expected := "CREATE TABLE bags (D varchar, C bigint, A boolean, B double, E timestamp, F blob, PRIMARY KEY (D, C, A)) WITH comment='1'"
+	stmt := (*ColumnFamily)(model.Bags).CreateStatement()
 	if expected != stmt {
 		t.Errorf("\nexpected: %s\nreceived: %s", expected, stmt)
 	}

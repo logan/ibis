@@ -9,7 +9,7 @@ import "tux21b.org/v1/gocql"
 
 // A SchemaDiff enumerates the changes necessary to transform one schema into another.
 type SchemaDiff struct {
-	Creations   []*Table          // tables that are completely missing from the former schema
+	Creations   []*ColumnFamily   // tables that are completely missing from the former schema
 	Alterations []TableAlteration // tables that have missing or altered columns
 }
 
@@ -90,11 +90,11 @@ func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 		return nil, err
 	}
 	schema := Schema{
-		Tables:     make(map[string]*Table),
+		CFs:        make(Keyspace),
 		nextTypeID: nextTypeID,
 	}
 	for _, t := range tables {
-		schema.Tables[strings.ToLower(t.Name)] = t
+		schema.CFs[strings.ToLower(t.Name)] = t
 	}
 	q := c.Query(
 		`SELECT columnfamily_name, column_name, validator FROM system.schema_columns
@@ -103,29 +103,29 @@ func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 	var cf_name, col_name, validator string
 	for i.Scan(&cf_name, &col_name, &validator) {
 		col := Column{Name: col_name, Type: typeFromValidator(validator)}
-		t := schema.Tables[cf_name]
+		t := schema.CFs[cf_name]
 		t.Columns = append(t.Columns, col)
 	}
 	return &schema, i.Close()
 }
 
-func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*Table, int, error) {
+func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*ColumnFamily, int, error) {
 	q := session.Query(
 		`SELECT columnfamily_name, key_aliases, column_aliases, comment
              FROM system.schema_columnfamilies WHERE keyspace_name = ?`, keyspace)
-	tables := make([]*Table, 0, 32)
+	tables := make([]*ColumnFamily, 0, 32)
 	var cf_name, key_aliases, column_aliases, comment string
 	maxTypeID := 0
 	i := q.Iter()
 	for i.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
-		o := TableOptions{
+		o := CFOptions{
 			PrimaryKey: keyFromAliases(key_aliases, column_aliases),
 			typeID:     typeIDFromComment(comment),
 		}
 		if o.typeID > maxTypeID {
 			maxTypeID = o.typeID
 		}
-		t := Table{Name: cf_name, Columns: make([]Column, 0, 16), Options: o}
+		t := ColumnFamily{Name: cf_name, Columns: make([]Column, 0, 16), Options: o}
 		tables = append(tables, &t)
 	}
 	return tables, maxTypeID + 1, i.Close()
@@ -168,17 +168,17 @@ func DiffLiveSchema(c *CassandraConn, model *Schema) (*SchemaDiff, error) {
 	if live, err = GetLiveSchema(c); err != nil {
 		return nil, err
 	}
-	for _, t := range live.Tables {
+	for _, t := range live.CFs {
 		if t.Options.typeID >= model.nextTypeID {
 			model.nextTypeID = t.Options.typeID + 1
 		}
-		if model_t, ok := model.Tables[t.Name]; ok {
+		if model_t, ok := model.CFs[t.Name]; ok {
 			model_t.Options.typeID = t.Options.typeID
 		}
 	}
-	var diff = &SchemaDiff{make([]*Table, 0), make([]TableAlteration, 0)}
-	for name, model_table := range model.Tables {
-		live_table, ok := live.Tables[strings.ToLower(name)]
+	var diff = &SchemaDiff{make([]*ColumnFamily, 0), make([]TableAlteration, 0)}
+	for name, model_table := range model.CFs {
+		live_table, ok := live.CFs[strings.ToLower(name)]
 		if ok {
 			alteration := TableAlteration{name, make([]Column, 0), make([]Column, 0)}
 			old_cols := make(map[string]string)

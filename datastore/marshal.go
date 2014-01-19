@@ -58,13 +58,22 @@ var columnTypeMap = map[string]string{
 	"time.Time": "timestamp",
 }
 
+var (
+	tiBoolean   = &gocql.TypeInfo{Type: gocql.TypeBoolean}
+	tiBlob      = &gocql.TypeInfo{Type: gocql.TypeBlob}
+	tiDouble    = &gocql.TypeInfo{Type: gocql.TypeDouble}
+	tiBigInt    = &gocql.TypeInfo{Type: gocql.TypeBigInt}
+	tiVarchar   = &gocql.TypeInfo{Type: gocql.TypeVarchar}
+	tiTimestamp = &gocql.TypeInfo{Type: gocql.TypeTimestamp}
+)
+
 var typeInfoMap = map[string]*gocql.TypeInfo{
-	"boolean":   &gocql.TypeInfo{Type: gocql.TypeBoolean},
-	"blob":      &gocql.TypeInfo{Type: gocql.TypeBlob},
-	"double":    &gocql.TypeInfo{Type: gocql.TypeDouble},
-	"bigint":    &gocql.TypeInfo{Type: gocql.TypeBigInt},
-	"varchar":   &gocql.TypeInfo{Type: gocql.TypeVarchar},
-	"timestamp": &gocql.TypeInfo{Type: gocql.TypeTimestamp},
+	"boolean":   tiBoolean,
+	"blob":      tiBlob,
+	"double":    tiDouble,
+	"bigint":    tiBigInt,
+	"varchar":   tiVarchar,
+	"timestamp": tiTimestamp,
 }
 
 var column_validators = map[string]string{
@@ -78,15 +87,10 @@ var column_validators = map[string]string{
 
 // MarshalRow produces a RowValues map from a Persistable struct with a registered Table.
 func MarshalRow(row Persistable) (result RowValues, err error) {
-	ptr_type := reflect.TypeOf(row)
-	table, ok := tableCache[ptr_type]
-	if !ok {
-		err = ErrTableNotAssociated
-		return
-	}
+	cf := row.GetCF()
 	value := reflect.Indirect(reflect.ValueOf(row))
 	result = make(RowValues)
-	for _, col := range table.Columns {
+	for _, col := range cf.Columns {
 		fieldval := value.FieldByName(col.Name)
 		if fieldval.IsValid() {
 			var marshalled []byte

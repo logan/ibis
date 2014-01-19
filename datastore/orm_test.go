@@ -5,42 +5,55 @@ import "testing"
 type TestOrm struct {
 	*Orm
 	*TestConn
+	M *TestModel
 }
 
 func NewTestOrm(t *testing.T) *TestOrm {
 	tc := NewTestConn(t)
-	orm := &Orm{CassandraConn: tc.CassandraConn, Model: testModel}
+	model := &TestModel{}
+	schema := ReflectSchemaFrom(model)
+	orm := &Orm{CassandraConn: tc.CassandraConn, Model: schema}
+	schema.Bind(orm)
 	var err error
-	if orm.SchemaUpdates, err = DiffLiveSchema(tc.CassandraConn, testModel); err != nil {
+	if orm.SchemaUpdates, err = DiffLiveSchema(tc.CassandraConn, schema); err != nil {
 		t.Fatal(err)
 	}
 	if err = orm.ApplySchemaUpdates(); err != nil {
 		t.Fatal(err)
 	}
-	return &TestOrm{orm, tc}
+	return &TestOrm{orm, tc, model}
 }
 
 func TestCreateAndLoadByKey(t *testing.T) {
 	orm := NewTestOrm(t)
 	defer orm.Close()
 
-	row_in := ormTestType{A: true, C: 1, D: "x"}
-	if err := orm.Create(&row_in); err != nil {
+	row := orm.M.Bags.NewRow().(*BagOfManyTypes)
+	row.A = true
+	row.C = 1
+	row.D = "x"
+	cf := (*ColumnFamily)(orm.M.Bags)
+	if err := cf.Create(row); err != nil {
 		t.Fatal(err)
 	}
 
-	var row_out ormTestType
-	orm.LoadByKey(&row_out, "x", 1, true)
-	if !rowsEqual(&row_in, &row_out) {
-		t.Errorf("\nexpected: %+v\nreceived: %+v", row_in, row_out)
+	row_out := orm.M.Bags.NewRow().(*BagOfManyTypes)
+	if err := cf.LoadByKey(row_out, "x", 1, true); err != nil {
+		t.Fatal(err)
+	}
+	if !rowsEqual(row, row_out) {
+		t.Errorf("\nexpected: %+v\nreceived: %+v", *row, row_out)
 	}
 
-	if err := orm.Create(&row_in); err != ErrAlreadyExists {
+	if err := cf.Create(row); err != ErrAlreadyExists {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
 	}
 	// reconstruct to clear loadedColumns()
-	row_in = ormTestType{A: true, C: 1, D: "x"}
-	if err := orm.Create(&row_in); err != ErrAlreadyExists {
+	row = orm.M.Bags.NewRow().(*BagOfManyTypes)
+	row.A = true
+	row.C = 1
+	row.D = "x"
+	if err := cf.Create(row); err != ErrAlreadyExists {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
 	}
 }

@@ -2,18 +2,16 @@ package datastore
 
 import "errors"
 import "fmt"
-import "reflect"
 import "strings"
 
 import "tux21b.org/v1/gocql"
 
 var (
-	ErrNotFound           = errors.New("not found")
-	ErrAlreadyExists      = errors.New("already exists")
-	ErrTableNotAssociated = errors.New("no table associated with this type of row")
+	ErrNotFound      = errors.New("not found")
+	ErrAlreadyExists = errors.New("already exists")
+	ErrTableNotBound = errors.New("table not bound; call table.Bind(orm)")
+	ErrInvalidType   = errors.New("invalid row type")
 )
-
-var tableCache = make(map[reflect.Type]*Table)
 
 // Persistent is an embeddable struct that provides the ability to persist data to Cassandra. For
 // example:
@@ -26,8 +24,8 @@ var tableCache = make(map[reflect.Type]*Table)
 //     Views int64
 //     Public bool
 //   }
-//   var PageTableOptions = datastore.TableOptions{PrimaryKey: []string{"Path"}}
-//   var PageTable = datastore.DefineTable(&Page{}, PageTableOptions)
+//   var PageCFOptions = datastore.CFOptions{PrimaryKey: []string{"Path"}}
+//   var PageTable = datastore.DefineTable(&Page{}, PageCFOptions)
 //
 // If an empty instance of this struct is passed to DefineTable, then filled in instances of the
 // struct can be saved to and loaded from Cassandra.
@@ -38,13 +36,19 @@ var tableCache = make(map[reflect.Type]*Table)
 //   loaded := Page{}
 //   orm.LoadByKey(&loaded, "/")
 type Persistent struct {
+	CF             *ColumnFamily `json:"-"`
 	_loadedColumns RowValues
 }
 
 // A Persistable is any struct that embeds Persistent. If such a struct is associated with a Table
 // in a Model, then it can be easily persisted to Cassandra.
 type Persistable interface {
+	GetCF() *ColumnFamily
 	loadedColumns() RowValues
+}
+
+func (s *Persistent) GetCF() *ColumnFamily {
+	return s.CF
 }
 
 func (s *Persistent) loadedColumns() RowValues {
@@ -54,9 +58,10 @@ func (s *Persistent) loadedColumns() RowValues {
 	return s._loadedColumns
 }
 
+// An Orm binds a Schema to a CassandraConn.
 type Orm struct {
 	*CassandraConn
-	Model         *Schema     // The tables (column families) to use in this keyspace.
+	Model         *Schema     // The column families to use in this keyspace.
 	SchemaUpdates *SchemaDiff // The differences found between the existing column families and the given Model.
 	SeqID         *SeqIDGenerator
 }
@@ -105,43 +110,24 @@ func placeholderList(n int) string {
 	return placeholderListString[:3*(n-1)+1]
 }
 
-// Create inserts a filled-in "row" into its column family. An error is returned if a row already
-// exists with the same primary key.
-func (orm *Orm) Create(row Persistable) error {
-	if len(row.loadedColumns()) > 0 {
-		return ErrAlreadyExists
-	}
-	return orm.commit(row, true)
-}
-
-// Commit writes any modified values in a loaded "row" to its column family.
-func (orm *Orm) Commit(row Persistable) error {
-	return orm.commit(row, false)
-}
-
-func (orm *Orm) commit(row Persistable, cas bool) error {
-	ptr_type := reflect.TypeOf(row)
-	table, ok := tableCache[ptr_type]
-	if !ok {
-		return ErrTableNotAssociated
-	}
+// Commit writes any modified values in the given row to the given CF.
+func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 	row_values, err := MarshalRow(row)
 	if err != nil {
 		return err
 	}
 	var seqid *SeqID
-	if table.Options.IndexBySeqID {
+	if cf.Options.IndexBySeqID {
 		s, err := orm.SeqID.New()
 		if err != nil {
 			return err
 		}
 		seqid = &s
-		ti := &gocql.TypeInfo{Type: gocql.TypeVarchar}
-		b, err := gocql.Marshal(ti, string(s))
+		b, err := gocql.Marshal(tiVarchar, string(s))
 		if err != nil {
 			return err
 		}
-		row_values["SeqID"] = &RowValue{b, ti}
+		row_values["SeqID"] = &RowValue{b, tiVarchar}
 	}
 	loadedColumns := row.loadedColumns()
 	row_values.subtractUnchanged(loadedColumns)
@@ -156,7 +142,7 @@ func (orm *Orm) commit(row Persistable, cas bool) error {
 		return nil
 	}
 
-	stmt := buildInsertStatement(table, newk, cas)
+	stmt := buildInsertStatement(cf, newk, cas)
 	params := make([]interface{}, len(newv))
 	for i, v := range newv {
 		params[i] = v
@@ -185,46 +171,40 @@ func (orm *Orm) commit(row Persistable, cas bool) error {
 	for i, col := range newk {
 		loadedColumns[col] = newv[i]
 	}
-	if table.Options.IndexBySeqID {
-		if err = addToSeqIDListing(orm, table, *seqid, row_values); err != nil {
+	if cf.Options.IndexBySeqID {
+		if err = addToSeqIDListing(orm, cf, *seqid, row_values); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func buildInsertStatement(table *Table, colnames []string, cas bool) string {
+func buildInsertStatement(cf *ColumnFamily, colnames []string, cas bool) string {
 	var cas_term string
 	if cas {
 		cas_term = " IF NOT EXISTS"
 	}
 	colname_list := strings.Join(colnames, ", ")
 	placeholders := placeholderList(len(colnames))
-	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)%s", table.Name, colname_list, placeholders, cas_term)
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)%s", cf.Name, colname_list, placeholders, cas_term)
 }
 
 // LoadByKey loads data from a row's column family into that row. The row is selected by the given
 // key values, which must correspond to the column family's defined primary key.
-func (orm *Orm) LoadByKey(row Persistable, key ...interface{}) error {
-	ptr_type := reflect.TypeOf(row)
-	table, ok := tableCache[ptr_type]
-	if !ok {
-		return ErrTableNotAssociated
-	}
-
-	colnames := make([]string, len(table.Columns))
-	for i, col := range table.Columns {
+func (orm *Orm) LoadByKey(cf *ColumnFamily, row Persistable, key ...interface{}) error {
+	colnames := make([]string, len(cf.Columns))
+	for i, col := range cf.Columns {
 		colnames[i] = col.Name
 	}
 
-	pkdef := table.Options.PrimaryKey
+	pkdef := cf.Options.PrimaryKey
 	rules := make([]string, len(pkdef))
 	for i, k := range pkdef {
 		rules[i] = fmt.Sprintf("%s = ?", k)
 	}
 
 	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
-		strings.Join(colnames, ", "), table.Name, strings.Join(rules, " AND "))
+		strings.Join(colnames, ", "), cf.Name, strings.Join(rules, " AND "))
 	q := orm.Query(stmt, key...)
 	if err := q.Scan(row.loadedColumns().receiverInterfaces(colnames)...); err != nil {
 		return err
@@ -233,20 +213,14 @@ func (orm *Orm) LoadByKey(row Persistable, key ...interface{}) error {
 }
 
 // Exists checks if a row exists in a given row's column family.
-func (orm *Orm) Exists(row Persistable, key ...interface{}) (bool, error) {
-	ptr_type := reflect.TypeOf(row)
-	table, ok := tableCache[ptr_type]
-	if !ok {
-		return false, ErrTableNotAssociated
-	}
-	pkdef := table.Options.PrimaryKey
+func (orm *Orm) Exists(cf *ColumnFamily, key ...interface{}) (bool, error) {
+	pkdef := cf.Options.PrimaryKey
 	rules := make([]string, len(pkdef))
 	for i, k := range pkdef {
 		rules[i] = fmt.Sprintf("%s = ?", k)
 	}
 
-	stmt := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s",
-		table.Name, strings.Join(rules, " AND "))
+	stmt := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", cf.Name, strings.Join(rules, " AND "))
 	q := orm.Query(stmt, key...)
 	var count int
 	if err := q.Scan(&count); err != nil {

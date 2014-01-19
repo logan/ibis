@@ -11,7 +11,7 @@ func TestGetLiveSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(schema.Tables) > 0 {
+	if len(schema.CFs) > 0 {
 		t.Fatalf("expected empty keyspace")
 	}
 
@@ -29,7 +29,7 @@ func TestGetLiveSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expected := Table{
+	expected := ColumnFamily{
 		Name: "test",
 		Columns: []Column{
 			Column{Name: "blobcol", Type: "blob"},
@@ -39,17 +39,17 @@ func TestGetLiveSchema(t *testing.T) {
 			Column{Name: "stringcol", Type: "varchar"},
 			Column{Name: "timecol", Type: "timestamp"},
 		},
-		Options: TableOptions{PrimaryKey: []string{"stringcol", "int64col", "boolcol"}},
+		Options: CFOptions{PrimaryKey: []string{"stringcol", "int64col", "boolcol"}},
 	}
 	schema, err = GetLiveSchema(tc.CassandraConn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(schema.Tables) != 1 {
-		t.Fatalf("expected one table, received %d", len(schema.Tables))
+	if len(schema.CFs) != 1 {
+		t.Fatalf("expected one table, received %d", len(schema.CFs))
 	}
-	if !reflect.DeepEqual(expected, *schema.Tables["test"]) {
-		t.Errorf("\nexpected: %+v\nreceived: %+v", expected, *schema.Tables["test"])
+	if !reflect.DeepEqual(expected, *schema.CFs["test"]) {
+		t.Errorf("\nexpected: %+v\nreceived: %+v", expected, *schema.CFs["test"])
 	}
 }
 
@@ -66,19 +66,19 @@ func TestDiffLiveSchema(t *testing.T) {
 	}
 
 	model := &Schema{
-		Tables: map[string]*Table{
-			"T1": &Table{
+		CFs: Keyspace{
+			"T1": &ColumnFamily{
 				Name: "T1",
 				Columns: []Column{
 					Column{Name: "A", Type: "varchar"},
 					Column{Name: "B", Type: "varchar"},
 				},
-				Options: TableOptions{PrimaryKey: []string{"A"}},
+				Options: CFOptions{PrimaryKey: []string{"A"}},
 			},
 		},
 	}
 
-	expected := &SchemaDiff{Creations: []*Table{model.Tables["T1"]}}
+	expected := &SchemaDiff{Creations: []*ColumnFamily{model.CFs["T1"]}}
 	diff, err = DiffLiveSchema(orm.TestConn.CassandraConn, model)
 	if err != nil {
 		t.Fatal(err)
@@ -91,21 +91,20 @@ func TestDiffLiveSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	model.Tables["T1"].Columns[1].Type = "blob"
-	model.Tables["T1"].Columns = append(model.Tables["T1"].Columns,
-		Column{Name: "C", Type: "bigint"})
-	model.Tables["T2"] = &Table{
+	model.CFs["T1"].Columns[1].Type = "blob"
+	model.CFs["T1"].Columns = append(model.CFs["T1"].Columns, Column{Name: "C", Type: "bigint"})
+	model.CFs["T2"] = &ColumnFamily{
 		Name:    "T2",
 		Columns: []Column{Column{Name: "X", Type: "varchar"}},
-		Options: TableOptions{PrimaryKey: []string{"X"}},
+		Options: CFOptions{PrimaryKey: []string{"X"}},
 	}
 	expected = &SchemaDiff{
-		Creations: []*Table{model.Tables["T2"]},
+		Creations: []*ColumnFamily{model.CFs["T2"]},
 		Alterations: []TableAlteration{
 			TableAlteration{
 				TableName:      "T1",
-				NewColumns:     model.Tables["T1"].Columns[2:],
-				AlteredColumns: []Column{model.Tables["T1"].Columns[1]},
+				NewColumns:     model.CFs["T1"].Columns[2:],
+				AlteredColumns: []Column{model.CFs["T1"].Columns[1]},
 			},
 		},
 	}

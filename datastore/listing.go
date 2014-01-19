@@ -1,30 +1,35 @@
 package datastore
 
+import "errors"
 import "fmt"
 import "reflect"
 import "strings"
 
 import "tux21b.org/v1/gocql"
 
+var (
+	ErrNoSeqIDListing = errors.New("table has no seqid listing")
+)
+
 type SeqIDPersistent struct {
 	Persistent
 	SeqID SeqID
 }
 
-func SeqIDListingTable(seqid_table *Table) *Table {
-	table := &Table{
+func SeqIDListingColumnFamily(seqid_table *ColumnFamily) *ColumnFamily {
+	table := &ColumnFamily{
 		Name: fmt.Sprintf("%sBySeqID", seqid_table.Name),
 		Columns: []Column{
 			Column{
 				Name: "Interval", Type: "varchar",
-				typeInfo: &gocql.TypeInfo{Type: gocql.TypeVarchar},
+				typeInfo: tiVarchar,
 			},
 			Column{
 				Name: "SeqID", Type: "varchar",
-				typeInfo: &gocql.TypeInfo{Type: gocql.TypeVarchar},
+				typeInfo: tiVarchar,
 			},
 		},
-		Options: TableOptions{
+		Options: CFOptions{
 			PrimaryKey: []string{"Interval", "SeqID"},
 			OnCreate:   insertSeqIDListingSentinel,
 		},
@@ -34,14 +39,14 @@ func SeqIDListingTable(seqid_table *Table) *Table {
 	return table
 }
 
-func insertSeqIDListingSentinel(orm *Orm, table *Table) error {
+func insertSeqIDListingSentinel(orm *Orm, table *ColumnFamily) error {
 	interval := currentInterval()
 	q := orm.Query(fmt.Sprintf("INSERT INTO %s (Interval, SeqID) VALUES (?, ?)", table.Name),
 		interval, "")
 	return q.Exec()
 }
 
-func addToSeqIDListing(orm *Orm, table *Table, seqid SeqID, rowValues RowValues) error {
+func addToSeqIDListing(orm *Orm, table *ColumnFamily, seqid SeqID, rowValues RowValues) error {
 	stmt := fmt.Sprintf("INSERT INTO %s (Interval, SeqID, %s) VALUES (%s)",
 		table.seqIDTable.Name, strings.Join(table.Options.PrimaryKey, ", "),
 		placeholderList(len(table.seqIDTable.Columns)))
@@ -64,8 +69,8 @@ type SeqIDListingIter struct {
 	Limit         int
 	ChunkSize     int
 	Err           error
-	orm           *Orm
-	table         *Table
+	rcf           ReflectableColumnFamily
+	cf            *ColumnFamily
 	keysRetrieved int
 	interval      string
 	rowchan       chan Persistable
@@ -73,14 +78,30 @@ type SeqIDListingIter struct {
 	exhausted     bool
 }
 
-func IterSeqIDListing(orm *Orm, table *Table) *SeqIDListingIter {
-	return &SeqIDListingIter{orm: orm, table: table}
+// IterSeqIDListing creates a listing iterator over a bound table with a seqid listing.
+func IterSeqIDListing(table ReflectableColumnFamily) *SeqIDListingIter {
+	cf := table.NewRow().GetCF()
+	var err error
+	if !cf.IsBound() {
+		err = ErrTableNotBound
+	} else if cf.seqIDTable == nil {
+		err = ErrNoSeqIDListing
+	}
+	return &SeqIDListingIter{rcf: table, cf: cf, Err: err}
 }
 
 // Next reads the next item from an iteration over a SeqIDListing. The item is read into the given
 // row object. If this function returns false, compare iter.Err to nil to determine whether an error
 // occurred or the iteration over the listing was merely exhausted.
 func (iter *SeqIDListingIter) Next(row Persistable) (ok bool) {
+	if iter.Err != nil {
+		return false
+	}
+	if !iter.cf.IsValidRowType(row) {
+		fmt.Println("SeqID invalid")
+		iter.Err = ErrInvalidType
+		return false
+	}
 	if iter.rowchan == nil {
 		iter.scanChunk(row)
 	}
@@ -117,11 +138,12 @@ func (iter *SeqIDListingIter) scanChunk(row Persistable) {
 				}
 			}
 			for pki := range iter.keychan {
-				persistable := buf.Index(buf_i).Interface().(Persistable)
-				if iter.Err = iter.orm.LoadByKey(persistable, pki...); iter.Err != nil {
+				row := iter.rcf.NewRow()
+				if iter.Err = iter.cf.LoadByKey(row, pki...); iter.Err != nil {
 					return
 				}
-				iter.rowchan <- persistable
+				buf.Index(buf_i).Elem().Set(reflect.ValueOf(row).Convert(row_type).Elem())
+				iter.rowchan <- row
 				buf_i = (buf_i + 1) % buf.Len()
 			}
 		}
@@ -157,11 +179,11 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 
 			ci := iter.queryCurrentInterval(limit)
 			for {
-				buf[buf_i] = make([]interface{}, len(iter.table.Options.PrimaryKey)+2)
+				buf[buf_i] = make([]interface{}, len(iter.cf.Options.PrimaryKey)+2)
 				buf[buf_i][0] = &interval
 				buf[buf_i][1] = &seqid
-				rvs[buf_i] = make([]RowValue, len(iter.table.Options.PrimaryKey))
-				for i, _ := range iter.table.Options.PrimaryKey {
+				rvs[buf_i] = make([]RowValue, len(iter.cf.Options.PrimaryKey))
+				for i, _ := range iter.cf.Options.PrimaryKey {
 					buf[buf_i][i+2] = &rvs[buf_i][i]
 				}
 				if !ci.Scan(buf[buf_i]...) {
@@ -197,8 +219,8 @@ func (iter *SeqIDListingIter) queryCurrentInterval(limit int) *gocql.Iter {
 		}
 	}
 	stmt := fmt.Sprintf("SELECT * FROM %s WHERE Interval = ? AND SeqID < ?"+
-		" ORDER BY SeqID DESC LIMIT %d", iter.table.seqIDTable.Name, limit)
-	q := iter.orm.Query(stmt, iter.interval, iter.Since)
+		" ORDER BY SeqID DESC LIMIT %d", iter.cf.seqIDTable.Name, limit)
+	q := iter.cf.orm.Query(stmt, iter.interval, iter.Since)
 	i := q.Iter()
 	return i
 }
