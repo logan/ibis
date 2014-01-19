@@ -33,7 +33,7 @@ func TestCreateAndLoadByKey(t *testing.T) {
 	row.C = 1
 	row.D = "x"
 	cf := (*ColumnFamily)(orm.M.Bags)
-	if err := cf.Create(row); err != nil {
+	if err := cf.CommitCAS(row); err != nil {
 		t.Fatal(err)
 	}
 
@@ -45,7 +45,7 @@ func TestCreateAndLoadByKey(t *testing.T) {
 		t.Errorf("\nexpected: %+v\nreceived: %+v", *row, row_out)
 	}
 
-	if err := cf.Create(row); err != ErrAlreadyExists {
+	if err := cf.CommitCAS(row); err != ErrAlreadyExists {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
 	}
 	// reconstruct to clear loadedColumns()
@@ -53,7 +53,7 @@ func TestCreateAndLoadByKey(t *testing.T) {
 	row.A = true
 	row.C = 1
 	row.D = "x"
-	if err := cf.Create(row); err != ErrAlreadyExists {
+	if err := cf.CommitCAS(row); err != ErrAlreadyExists {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
 	}
 }

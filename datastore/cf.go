@@ -157,10 +157,10 @@ func (t *ColumnFamily) LoadByKey(row Persistable, key ...interface{}) error {
 	return t.orm.LoadByKey(t, row, key...)
 }
 
-// Create inserts a filled-in "row" into the table's column family. An error is returned if the type
-// of the row is not compatible with the one registered for the table, or if a row already exists
-// with the same primary key.
-func (t *ColumnFamily) Create(row Persistable) error {
+// CommitCAS inserts a filled-in "row" into the table's column family. An error is returned if the
+// type of the row is not compatible with the one registered for the table, or if a row already
+// exists with the same primary key.
+func (t *ColumnFamily) CommitCAS(row Persistable) error {
 	if !t.IsBound() {
 		return ErrTableNotBound
 	}
