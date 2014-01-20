@@ -32,7 +32,7 @@ func (t *BagOfManyTypesTable) NewRow() Persistable {
 }
 
 func (t *BagOfManyTypesTable) ConfigureCF(options *CFOptions) {
-	options.PrimaryKey = []string{"D", "C", "A"}
+	options.Key("D", "C", "A")
 }
 
 type TestModel struct {

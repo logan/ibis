@@ -15,8 +15,9 @@ func TestReflectSchemaFrom(t *testing.T) {
 			Column{Name: "F", Type: "blob", typeInfo: tiBlob},
 		},
 	}
+	expected.Options = NewCFOptions(&expected)
 	bomtt := &BagOfManyTypesTable{}
-	bomtt.ConfigureCF(&expected.Options)
+	bomtt.ConfigureCF(expected.Options)
 	expected.Options.typeID = 1
 
 	model := &TestModel{}

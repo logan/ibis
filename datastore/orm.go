@@ -117,25 +117,25 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 	if err != nil {
 		return err
 	}
-	var seqid *SeqID
-	if cf.Options.IndexBySeqID {
-		seqid_rv, ok := row_values["SeqID"]
-		if !ok || len(seqid_rv.Value) == 0 {
-			s, err := orm.SeqID.New()
-			if err != nil {
-				return err
-			}
-			seqid = &s
-			b, err := gocql.Marshal(tiVarchar, string(s))
-			if err != nil {
-				return err
-			}
-			row_values["SeqID"] = &RowValue{b, tiVarchar}
-		} else {
-			seqid = new(SeqID)
-			gocql.Unmarshal(tiVarchar, row_values["SeqID"].Value, seqid)
+
+	// First allow indexes to update both Cassandra and the Persistable.
+	b := gocql.NewBatch(gocql.LoggedBatch)
+	for _, idx := range cf.Options.Indexes {
+		idx_stmts, err := idx.Index(cf, row_values)
+		if err != nil {
+			return err
+		}
+		for _, idx_stmt := range idx_stmts {
+			b.Query(idx_stmt.Query, idx_stmt.Params...)
 		}
 	}
+	if len(b.Entries) > 0 {
+		if err = orm.Session.ExecuteBatch(b); err != nil {
+			return err
+		}
+	}
+
+	// Now compute what needs to be written to the Persistable's CF.
 	loadedColumns := row.loadedColumns()
 	row_values.subtractUnchanged(loadedColumns)
 	newk := make([]string, 0, len(row_values))
@@ -149,6 +149,7 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 		return nil
 	}
 
+	// Generate the appropriate CQL.
 	var stmt string
 	var params []interface{}
 	if cas {
@@ -171,6 +172,7 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 		copy(params[len(newv):], pkvals)
 	}
 
+	// Apply the computed CQL and check results.
 	q := orm.Query(stmt, params...)
 	if cas {
 		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
@@ -194,12 +196,10 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 	for i, col := range newk {
 		loadedColumns[col] = newv[i]
 	}
-	if cf.Options.IndexBySeqID {
-		if err = addToSeqIDListing(orm, cf, *seqid, row_values); err != nil {
-			return err
-		}
+	if err = row.loadedColumns().UnmarshalRow(row); err != nil {
+		return err
 	}
-	return row.loadedColumns().UnmarshalRow(row)
+	return nil
 }
 
 func buildInsertStatement(cf *ColumnFamily, colnames []string) string {

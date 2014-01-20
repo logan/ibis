@@ -39,8 +39,8 @@ func TestGetLiveSchema(t *testing.T) {
 			Column{Name: "stringcol", Type: "varchar"},
 			Column{Name: "timecol", Type: "timestamp"},
 		},
-		Options: CFOptions{PrimaryKey: []string{"stringcol", "int64col", "boolcol"}},
 	}
+	expected.Options = NewCFOptions(&expected).Key("stringcol", "int64col", "boolcol")
 	schema, err = GetLiveSchema(tc.CassandraConn)
 	if err != nil {
 		t.Fatal(err)
@@ -73,10 +73,10 @@ func TestDiffLiveSchema(t *testing.T) {
 					Column{Name: "A", Type: "varchar"},
 					Column{Name: "B", Type: "varchar"},
 				},
-				Options: CFOptions{PrimaryKey: []string{"A"}},
 			},
 		},
 	}
+	model.CFs["T1"].Options = NewCFOptions(model.CFs["T1"]).Key("A")
 
 	expected := &SchemaDiff{Creations: []*ColumnFamily{model.CFs["T1"]}}
 	diff, err = DiffLiveSchema(orm.TestConn.CassandraConn, model)
@@ -96,8 +96,8 @@ func TestDiffLiveSchema(t *testing.T) {
 	model.CFs["T2"] = &ColumnFamily{
 		Name:    "T2",
 		Columns: []Column{Column{Name: "X", Type: "varchar"}},
-		Options: CFOptions{PrimaryKey: []string{"X"}},
 	}
+	model.CFs["T2"].Options = NewCFOptions(model.CFs["T2"]).Key("X")
 	expected = &SchemaDiff{
 		Creations: []*ColumnFamily{model.CFs["T2"]},
 		Alterations: []TableAlteration{

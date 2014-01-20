@@ -16,9 +16,58 @@ type SeqIDPersistent struct {
 	SeqID SeqID
 }
 
-func SeqIDListingColumnFamily(seqid_table *ColumnFamily) *ColumnFamily {
-	table := &ColumnFamily{
-		Name: fmt.Sprintf("%sBySeqID", seqid_table.Name),
+type seqIDIndexKey int
+
+const SEQID seqIDIndexKey = iota
+
+type seqIDIndexer ColumnFamily
+
+func AddSeqIDIndex(options *CFOptions) {
+	indexer := SeqIDListingColumnFamily(options.CF)
+	options.Set(SEQID, indexer)
+	options.Index(indexer)
+}
+
+func (idx *seqIDIndexer) CFs() []*ColumnFamily {
+	return []*ColumnFamily{(*ColumnFamily)(idx)}
+}
+
+func (idx *seqIDIndexer) Index(cf *ColumnFamily, rowValues RowValues) ([]CFIndexStatement, error) {
+	var seqid SeqID
+	var err error
+	seqid_rv, ok := rowValues["SeqID"]
+	if !ok || len(seqid_rv.Value) == 0 {
+		seqid, err = cf.orm.SeqID.New()
+		if err != nil {
+			return nil, err
+		}
+		b, err := gocql.Marshal(tiVarchar, string(seqid))
+		if err != nil {
+			return nil, err
+		}
+		rowValues["SeqID"] = &RowValue{b, tiVarchar}
+	} else {
+		gocql.Unmarshal(tiVarchar, seqid_rv.Value, &seqid)
+	}
+
+	stmt := fmt.Sprintf("INSERT INTO %s (Interval, SeqID, %s) VALUES (%s)",
+		idx.Name, strings.Join(cf.Options.PrimaryKey, ", "), placeholderList(len(idx.Columns)))
+	values := make([]*RowValue, len(cf.Options.PrimaryKey))
+	for i, pk_name := range cf.Options.PrimaryKey {
+		values[i] = rowValues[pk_name]
+	}
+	params := make([]interface{}, len(values)+2)
+	params[0] = interval(seqid)
+	params[1] = seqid
+	for i, v := range values {
+		params[i+2] = v
+	}
+	return []CFIndexStatement{CFIndexStatement{stmt, params}}, nil
+}
+
+func SeqIDListingColumnFamily(cf *ColumnFamily) *seqIDIndexer {
+	idxCf := &ColumnFamily{
+		Name: fmt.Sprintf("%sBySeqID", cf.Name),
 		Columns: []Column{
 			Column{
 				Name: "Interval", Type: "varchar",
@@ -29,14 +78,11 @@ func SeqIDListingColumnFamily(seqid_table *ColumnFamily) *ColumnFamily {
 				typeInfo: tiVarchar,
 			},
 		},
-		Options: CFOptions{
-			PrimaryKey: []string{"Interval", "SeqID"},
-			OnCreate:   insertSeqIDListingSentinel,
-		},
 	}
-	table.Columns = append(table.Columns,
-		seqid_table.Columns[:len(seqid_table.Options.PrimaryKey)]...)
-	return table
+	idxCf.Columns = append(idxCf.Columns, cf.Columns[:len(cf.Options.PrimaryKey)]...)
+	idxCf.Options = NewCFOptions(idxCf).Key("Interval", "SeqID")
+	idxCf.Options.OnCreate(insertSeqIDListingSentinel)
+	return (*seqIDIndexer)(idxCf)
 }
 
 func insertSeqIDListingSentinel(orm *Orm, table *ColumnFamily) error {
@@ -46,31 +92,14 @@ func insertSeqIDListingSentinel(orm *Orm, table *ColumnFamily) error {
 	return q.Exec()
 }
 
-func addToSeqIDListing(orm *Orm, table *ColumnFamily, seqid SeqID, rowValues RowValues) error {
-	stmt := fmt.Sprintf("INSERT INTO %s (Interval, SeqID, %s) VALUES (%s)",
-		table.seqIDTable.Name, strings.Join(table.Options.PrimaryKey, ", "),
-		placeholderList(len(table.seqIDTable.Columns)))
-	values := make([]*RowValue, len(table.Options.PrimaryKey))
-	for i, pk_name := range table.Options.PrimaryKey {
-		values[i] = rowValues[pk_name]
-	}
-	valueints := make([]interface{}, len(values)+2)
-	valueints[0] = interval(seqid)
-	valueints[1] = seqid
-	for i, v := range values {
-		valueints[i+2] = v
-	}
-	q := orm.Query(stmt, valueints...)
-	return q.Exec()
-}
-
 type SeqIDListingIter struct {
 	After         SeqID
 	Limit         int
 	ChunkSize     int
 	Err           error
 	rcf           ReflectableColumnFamily
-	cf            *ColumnFamily
+	rowcf         *ColumnFamily
+	idxcf         *ColumnFamily
 	keysRetrieved int
 	interval      string
 	rowchan       chan Persistable
@@ -81,13 +110,13 @@ type SeqIDListingIter struct {
 // IterSeqIDListing creates a listing iterator over a bound table with a seqid listing.
 func IterSeqIDListing(table ReflectableColumnFamily) *SeqIDListingIter {
 	cf := table.NewRow().GetCF()
-	var err error
 	if !cf.IsBound() {
-		err = ErrTableNotBound
-	} else if cf.seqIDTable == nil {
-		err = ErrNoSeqIDListing
+		return &SeqIDListingIter{Err: ErrTableNotBound}
 	}
-	return &SeqIDListingIter{rcf: table, cf: cf, Err: err}
+	if idx, ok := cf.Options.Get(SEQID).(*seqIDIndexer); ok {
+		return &SeqIDListingIter{rcf: table, rowcf: cf, idxcf: (*ColumnFamily)(idx)}
+	}
+	return &SeqIDListingIter{Err: ErrNoSeqIDListing}
 }
 
 // Next reads the next item from an iteration over a SeqIDListing. The item is read into the given
@@ -97,7 +126,7 @@ func (iter *SeqIDListingIter) Next(row Persistable) (ok bool) {
 	if iter.Err != nil {
 		return false
 	}
-	if !iter.cf.IsValidRowType(row) {
+	if !iter.rowcf.IsValidRowType(row) {
 		iter.Err = ErrInvalidType
 		return false
 	}
@@ -138,7 +167,7 @@ func (iter *SeqIDListingIter) scanChunk(row Persistable) {
 			}
 			for pki := range iter.keychan {
 				row := iter.rcf.NewRow()
-				if iter.Err = iter.cf.LoadByKey(row, pki...); iter.Err != nil {
+				if iter.Err = iter.rowcf.LoadByKey(row, pki...); iter.Err != nil {
 					return
 				}
 				buf.Index(buf_i).Elem().Set(reflect.ValueOf(row).Convert(row_type).Elem())
@@ -178,11 +207,11 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 
 			ci := iter.queryCurrentInterval(limit)
 			for {
-				buf[buf_i] = make([]interface{}, len(iter.cf.Options.PrimaryKey)+2)
+				buf[buf_i] = make([]interface{}, len(iter.rowcf.Options.PrimaryKey)+2)
 				buf[buf_i][0] = &interval
 				buf[buf_i][1] = &seqid
-				rvs[buf_i] = make([]RowValue, len(iter.cf.Options.PrimaryKey))
-				for i, _ := range iter.cf.Options.PrimaryKey {
+				rvs[buf_i] = make([]RowValue, len(iter.rowcf.Options.PrimaryKey))
+				for i, _ := range iter.rowcf.Options.PrimaryKey {
 					buf[buf_i][i+2] = &rvs[buf_i][i]
 				}
 				if !ci.Scan(buf[buf_i]...) {
@@ -214,15 +243,15 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 func (iter *SeqIDListingIter) queryCurrentInterval(limit int) *gocql.Iter {
 	if iter.interval == "" {
 		if iter.After == "" {
-			iter.interval = iter.cf.orm.SeqID.CurrentInterval()
+			iter.interval = iter.rowcf.orm.SeqID.CurrentInterval()
 			iter.After = intervalToSeqID(incrInterval(iter.interval))
 		} else {
 			iter.interval = interval(iter.After)
 		}
 	}
 	stmt := fmt.Sprintf("SELECT * FROM %s WHERE Interval = ? AND SeqID < ?"+
-		" ORDER BY SeqID DESC LIMIT %d", iter.cf.seqIDTable.Name, limit)
-	q := iter.cf.orm.Query(stmt, iter.interval, iter.After)
+		" ORDER BY SeqID DESC LIMIT %d", iter.idxcf.Name, limit)
+	q := iter.idxcf.orm.Query(stmt, iter.interval, iter.After)
 	i := q.Iter()
 	return i
 }

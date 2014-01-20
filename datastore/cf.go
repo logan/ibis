@@ -8,11 +8,10 @@ import "tux21b.org/v1/gocql"
 
 // A ColumnFamily describes how rows of a table are stored in Cassandra.
 type ColumnFamily struct {
-	Name       string    // The name of the column family.
-	Columns    []Column  // The definition of the column family's columns.
-	Options    CFOptions // Options for the column family, such as primary key.
-	seqIDTable *ColumnFamily
-	orm        *Orm
+	Name    string     // The name of the column family.
+	Columns []Column   // The definition of the column family's columns.
+	Options *CFOptions // Options for the column family, such as primary key.
+	orm     *Orm
 }
 
 // CreateStatement returns the CQL statement that would create this table.
@@ -29,16 +28,6 @@ func (t *ColumnFamily) CreateStatement() string {
 		t.Name, strings.Join(cols, ", "), strings.Join(t.Options.PrimaryKey, ", "), options)
 }
 
-type OnCreateHook func(*Orm, *ColumnFamily) error
-
-// CFOptions is used to provide additional properties for a column family definition.
-type CFOptions struct {
-	PrimaryKey   []string     // Required. The list of columns comprising the primary key. The first column defines partitions.
-	IndexBySeqID bool         // If true, maintain a secondary index of rows by SeqID.
-	OnCreate     OnCreateHook // If given, will be called immediately after table creation.
-	typeID       int
-}
-
 // A Column gives the name and data type of a Cassandra column. The value of type should be a CQL
 // data type (e.g. bigint, varchar, double).
 type Column struct {
@@ -47,7 +36,7 @@ type Column struct {
 	typeInfo *gocql.TypeInfo
 }
 
-func cfFromRowType(name string, row_type reflect.Type, options CFOptions) *ColumnFamily {
+func (cf *ColumnFamily) fillFromRowType(name string, row_type reflect.Type) {
 	if row_type.Kind() != reflect.Ptr {
 		panic("row must be pointer to struct")
 	}
@@ -56,34 +45,8 @@ func cfFromRowType(name string, row_type reflect.Type, options CFOptions) *Colum
 		panic("row must be pointer to struct")
 	}
 
-	colmap := make(map[string]Column)
-	for _, col := range columnsFromStructType(row_type) {
-		colmap[col.Name] = col
-	}
-
-	cf := &ColumnFamily{
-		Name:    strings.ToLower(name),
-		Columns: make([]Column, 0, len(colmap)),
-		Options: options,
-	}
-
-	// primary key columns must come first and in order
-	for _, pk_name := range options.PrimaryKey {
-		col, ok := colmap[pk_name]
-		if !ok {
-			panic(fmt.Sprintf("primary key refers to invalid column (%s)", pk_name))
-		}
-		cf.Columns = append(cf.Columns, col)
-		delete(colmap, pk_name)
-	}
-	for _, col := range colmap {
-		cf.Columns = append(cf.Columns, col)
-	}
-
-	if options.IndexBySeqID {
-		cf.seqIDTable = SeqIDListingColumnFamily(cf)
-	}
-	return cf
+	cf.Name = strings.ToLower(name)
+	cf.Columns = columnsFromStructType(row_type)
 }
 
 func columnsFromStructType(struct_type reflect.Type) []Column {
@@ -125,6 +88,13 @@ func goTypeToCassType(t reflect.Type) (string, bool) {
 // Bind returns a new ColumnFamily bound to the given *Orm.
 func (t *ColumnFamily) Bind(orm *Orm) {
 	t.orm = orm
+	for _, val := range t.Options.ctx {
+		if idx, ok := val.(CFIndex); ok {
+			for _, subcf := range idx.CFs() {
+				subcf.Bind(orm)
+			}
+		}
+	}
 }
 
 // IsBound returns true if the table is bound to an *Orm.

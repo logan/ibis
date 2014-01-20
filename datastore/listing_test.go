@@ -24,8 +24,8 @@ type seqidTestP struct {
 type seqidTestT ColumnFamily
 
 func (t *seqidTestT) ConfigureCF(options *CFOptions) {
-	options.PrimaryKey = []string{"Name"}
-	options.IndexBySeqID = true
+	options.Key("Name")
+	AddSeqIDIndex(options)
 }
 
 func (t *seqidTestT) CF() *ColumnFamily {

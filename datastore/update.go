@@ -39,8 +39,8 @@ func (d *SchemaDiff) Apply(orm *Orm) error {
 		if err := orm.Query(t.CreateStatement()).Exec(); err != nil {
 			return err
 		}
-		if t.Options.OnCreate != nil {
-			if err := t.Options.OnCreate(orm, t); err != nil {
+		for _, hook := range t.Options.onCreateHooks {
+			if err := hook(orm, t); err != nil {
 				return err
 			}
 		}
@@ -106,6 +106,10 @@ func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 		t := schema.CFs[cf_name]
 		t.Columns = append(t.Columns, col)
 	}
+	for _, cf := range schema.CFs {
+		// reapply primary key to fix column ordering
+		cf.Options.Key(cf.Options.PrimaryKey...)
+	}
 	return &schema, i.Close()
 }
 
@@ -118,14 +122,12 @@ func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*ColumnFa
 	maxTypeID := 0
 	i := q.Iter()
 	for i.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
-		o := CFOptions{
-			PrimaryKey: keyFromAliases(key_aliases, column_aliases),
-			typeID:     typeIDFromComment(comment),
+		t := ColumnFamily{Name: cf_name, Columns: make([]Column, 0, 16)}
+		t.Options = NewCFOptions(&t).Key(keyFromAliases(key_aliases, column_aliases)...)
+		t.Options.typeID = typeIDFromComment(comment)
+		if t.Options.typeID > maxTypeID {
+			maxTypeID = t.Options.typeID
 		}
-		if o.typeID > maxTypeID {
-			maxTypeID = o.typeID
-		}
-		t := ColumnFamily{Name: cf_name, Columns: make([]Column, 0, 16), Options: o}
 		tables = append(tables, &t)
 	}
 	return tables, maxTypeID + 1, i.Close()
