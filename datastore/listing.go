@@ -50,11 +50,21 @@ func (idx *seqIDIndexer) Index(cf *ColumnFamily, rowValues RowValues) ([]CFIndex
 		gocql.Unmarshal(tiVarchar, seqid_rv.Value, &seqid)
 	}
 
-	stmt := fmt.Sprintf("INSERT INTO %s (Interval, SeqID, %s) VALUES (%s)",
-		idx.Name, strings.Join(cf.Options.PrimaryKey, ", "), placeholderList(len(idx.Columns)))
-	values := make([]*RowValue, len(cf.Options.PrimaryKey))
-	for i, pk_name := range cf.Options.PrimaryKey {
-		values[i] = rowValues[pk_name]
+	var pkPart string
+	if cf.Options.PrimaryKey[0] != "SeqID" {
+		pkPart = fmt.Sprintf(", %s", strings.Join(cf.Options.PrimaryKey, ", "))
+	}
+	stmt := fmt.Sprintf("INSERT INTO %s (Interval, SeqID%s) VALUES (%s)",
+		idx.Name, pkPart, placeholderList(len(idx.Columns)))
+
+	var values []*RowValue
+	if cf.Options.PrimaryKey[0] == "SeqID" {
+		values = make([]*RowValue, 0)
+	} else {
+		values = make([]*RowValue, len(cf.Options.PrimaryKey))
+		for i, pk_name := range cf.Options.PrimaryKey {
+			values[i] = rowValues[pk_name]
+		}
 	}
 	params := make([]interface{}, len(values)+2)
 	params[0] = interval(seqid)
@@ -79,7 +89,9 @@ func SeqIDListingColumnFamily(cf *ColumnFamily) *seqIDIndexer {
 			},
 		},
 	}
-	idxCf.Columns = append(idxCf.Columns, cf.Columns[:len(cf.Options.PrimaryKey)]...)
+	if cf.Options.PrimaryKey[0] != "SeqID" {
+		idxCf.Columns = append(idxCf.Columns, cf.Columns[:len(cf.Options.PrimaryKey)]...)
+	}
 	idxCf.Options = NewCFOptions(idxCf).Key("Interval", "SeqID")
 	idxCf.Options.OnCreate(insertSeqIDListingSentinel)
 	return (*seqIDIndexer)(idxCf)
@@ -187,6 +199,11 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 
 		defer close(iter.keychan)
 
+		pkLen := len(iter.rowcf.Options.PrimaryKey)
+		pkIsSeqID := iter.rowcf.Options.PrimaryKey[0] == "SeqID"
+		if pkIsSeqID {
+			pkLen = 0
+		}
 		buf := make([][]interface{}, iter.ChunkSize)
 		rvs := make([][]RowValue, iter.ChunkSize)
 		buf_i := 0
@@ -207,12 +224,14 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 
 			ci := iter.queryCurrentInterval(limit)
 			for {
-				buf[buf_i] = make([]interface{}, len(iter.rowcf.Options.PrimaryKey)+2)
+				buf[buf_i] = make([]interface{}, 2+pkLen)
 				buf[buf_i][0] = &interval
 				buf[buf_i][1] = &seqid
-				rvs[buf_i] = make([]RowValue, len(iter.rowcf.Options.PrimaryKey))
-				for i, _ := range iter.rowcf.Options.PrimaryKey {
-					buf[buf_i][i+2] = &rvs[buf_i][i]
+				rvs[buf_i] = make([]RowValue, pkLen)
+				if !pkIsSeqID {
+					for i, _ := range iter.rowcf.Options.PrimaryKey {
+						buf[buf_i][i+2] = &rvs[buf_i][i]
+					}
 				}
 				if !ci.Scan(buf[buf_i]...) {
 					break
@@ -224,7 +243,11 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 				}
 				iter.After = seqid
 				iter.keysRetrieved++
-				iter.keychan <- buf[buf_i][2:]
+				if pkIsSeqID {
+					iter.keychan <- []interface{}{seqid}
+				} else {
+					iter.keychan <- buf[buf_i][2:]
+				}
 				buf_i = (buf_i + 1) % len(buf)
 			}
 			if iter.Err = ci.Close(); iter.Err != nil {
