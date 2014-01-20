@@ -1,6 +1,7 @@
 package datastore
 
 import "testing"
+import "time"
 
 type TestOrm struct {
 	*Orm
@@ -24,17 +25,33 @@ func NewTestOrm(t *testing.T) *TestOrm {
 	return &TestOrm{orm, tc, model}
 }
 
-func TestCreateAndLoadByKey(t *testing.T) {
+func TestCreateAndLoadByKeyAndExists(t *testing.T) {
 	orm := NewTestOrm(t)
 	defer orm.Close()
+
+	cf := (*ColumnFamily)(orm.M.Bags)
+	b, err := cf.Exists("x", 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b {
+		t.Fatal("Exists returned true on empty keyspace")
+	}
 
 	row := orm.M.Bags.NewRow().(*BagOfManyTypes)
 	row.A = true
 	row.C = 1
 	row.D = "x"
-	cf := (*ColumnFamily)(orm.M.Bags)
 	if err := cf.CommitCAS(row); err != nil {
 		t.Fatal(err)
+	}
+
+	b, err = cf.Exists("x", 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !b {
+		t.Fatal("Exists should have returned true")
 	}
 
 	row_out := orm.M.Bags.NewRow().(*BagOfManyTypes)
@@ -55,5 +72,33 @@ func TestCreateAndLoadByKey(t *testing.T) {
 	row.D = "x"
 	if err := cf.CommitCAS(row); err != ErrAlreadyExists {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
+	}
+}
+
+func TestCommit(t *testing.T) {
+	orm := NewTestOrm(t)
+	defer orm.Close()
+
+	now := time.Now()
+	cf := (*ColumnFamily)(orm.M.Bags)
+	row := orm.M.Bags.NewRow().(*BagOfManyTypes)
+	row.A = true
+	row.C = 1
+	row.D = "x"
+	if err := cf.CommitCAS(row); err != nil {
+		t.Fatal(err)
+	}
+
+	row.E = now
+	if err := cf.Commit(row); err != nil {
+		t.Fatal(err)
+	}
+
+	out := orm.M.Bags.NewRow().(*BagOfManyTypes)
+	if err := cf.LoadByKey(out, "x", 1, true); err != nil {
+		t.Fatal(err)
+	}
+	if !rowsEqual(row, out) {
+		t.Errorf("\nexpected: %+v\nreceived: %+v", *row, out)
 	}
 }

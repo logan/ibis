@@ -112,6 +112,7 @@ func placeholderList(n int) string {
 
 // Commit writes any modified values in the given row to the given CF.
 func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
+	pkdef := cf.Options.PrimaryKey
 	row_values, err := MarshalRow(row)
 	if err != nil {
 		return err
@@ -148,10 +149,26 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 		return nil
 	}
 
-	stmt := buildInsertStatement(cf, newk, cas)
-	params := make([]interface{}, len(newv))
-	for i, v := range newv {
-		params[i] = v
+	var stmt string
+	var params []interface{}
+	if cas {
+		stmt = buildInsertStatement(cf, newk)
+		params = make([]interface{}, len(newv))
+		for i, v := range newv {
+			params[i] = v
+		}
+	} else {
+		stmt = buildUpdateStatement(cf, newk)
+		pkvals := make([]interface{}, len(pkdef))
+		for i, k := range pkdef {
+			pkvals[i] = loadedColumns[k]
+			delete(row_values, k)
+		}
+		params = make([]interface{}, len(newv)+len(pkvals))
+		for i, v := range newv {
+			params[i] = v
+		}
+		copy(params[len(newv):], pkvals)
 	}
 
 	q := orm.Query(stmt, params...)
@@ -185,14 +202,25 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 	return row.loadedColumns().UnmarshalRow(row)
 }
 
-func buildInsertStatement(cf *ColumnFamily, colnames []string, cas bool) string {
-	var cas_term string
-	if cas {
-		cas_term = " IF NOT EXISTS"
-	}
+func buildInsertStatement(cf *ColumnFamily, colnames []string) string {
 	colname_list := strings.Join(colnames, ", ")
 	placeholders := placeholderList(len(colnames))
-	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)%s", cf.Name, colname_list, placeholders, cas_term)
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) IF NOT EXISTS",
+		cf.Name, colname_list, placeholders)
+}
+
+func buildUpdateStatement(cf *ColumnFamily, colnames []string) string {
+	set_terms := make([]string, len(colnames))
+	for i, colname := range colnames {
+		set_terms[i] = fmt.Sprintf("%s = ?", colname)
+	}
+	pkdef := cf.Options.PrimaryKey
+	where_terms := make([]string, len(pkdef))
+	for i, k := range pkdef {
+		where_terms[i] = fmt.Sprintf("%s = ?", k)
+	}
+	return fmt.Sprintf("UPDATE %s SET %s WHERE %s",
+		cf.Name, strings.Join(set_terms, ", "), strings.Join(where_terms, " AND "))
 }
 
 // LoadByKey loads data from a row's column family into that row. The row is selected by the given
