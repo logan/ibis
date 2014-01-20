@@ -40,7 +40,7 @@ func SeqIDListingColumnFamily(seqid_table *ColumnFamily) *ColumnFamily {
 }
 
 func insertSeqIDListingSentinel(orm *Orm, table *ColumnFamily) error {
-	interval := currentInterval()
+	interval := orm.SeqID.CurrentInterval()
 	q := orm.Query(fmt.Sprintf("INSERT INTO %s (Interval, SeqID) VALUES (?, ?)", table.Name),
 		interval, "")
 	return q.Exec()
@@ -65,7 +65,7 @@ func addToSeqIDListing(orm *Orm, table *ColumnFamily, seqid SeqID, rowValues Row
 }
 
 type SeqIDListingIter struct {
-	Since         SeqID
+	After         SeqID
 	Limit         int
 	ChunkSize     int
 	Err           error
@@ -98,7 +98,6 @@ func (iter *SeqIDListingIter) Next(row Persistable) (ok bool) {
 		return false
 	}
 	if !iter.cf.IsValidRowType(row) {
-		fmt.Println("SeqID invalid")
 		iter.Err = ErrInvalidType
 		return false
 	}
@@ -194,7 +193,7 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 					iter.exhausted = true
 					return
 				}
-				iter.Since = seqid
+				iter.After = seqid
 				iter.keysRetrieved++
 				iter.keychan <- buf[buf_i][2:]
 				buf_i = (buf_i + 1) % len(buf)
@@ -204,6 +203,9 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 				return
 			}
 			iter.interval = decrInterval(iter.interval)
+			if iter.Limit > 0 && iter.keysRetrieved >= iter.Limit {
+				iter.exhausted = true
+			}
 		}
 	}()
 	return
@@ -211,16 +213,16 @@ func (iter *SeqIDListingIter) scanInterval(row Persistable) {
 
 func (iter *SeqIDListingIter) queryCurrentInterval(limit int) *gocql.Iter {
 	if iter.interval == "" {
-		if iter.Since == "" {
-			iter.interval = currentInterval()
-			iter.Since = SeqID(incrInterval(iter.interval))
+		if iter.After == "" {
+			iter.interval = iter.cf.orm.SeqID.CurrentInterval()
+			iter.After = intervalToSeqID(incrInterval(iter.interval))
 		} else {
-			iter.interval = interval(iter.Since)
+			iter.interval = interval(iter.After)
 		}
 	}
 	stmt := fmt.Sprintf("SELECT * FROM %s WHERE Interval = ? AND SeqID < ?"+
 		" ORDER BY SeqID DESC LIMIT %d", iter.cf.seqIDTable.Name, limit)
-	q := iter.cf.orm.Query(stmt, iter.interval, iter.Since)
+	q := iter.cf.orm.Query(stmt, iter.interval, iter.After)
 	i := q.Iter()
 	return i
 }

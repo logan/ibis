@@ -151,7 +151,6 @@ func (t *ColumnFamily) LoadByKey(row Persistable, key ...interface{}) error {
 		return ErrTableNotBound
 	}
 	if !t.IsValidRowType(row) {
-		fmt.Println("LoadByKey invalid")
 		return ErrInvalidType
 	}
 	return t.orm.LoadByKey(t, row, key...)
@@ -165,7 +164,6 @@ func (t *ColumnFamily) CommitCAS(row Persistable) error {
 		return ErrTableNotBound
 	}
 	if !t.IsValidRowType(row) {
-		fmt.Println("Create invalid")
 		return ErrInvalidType
 	}
 	// TODO: handle pk changes
@@ -182,7 +180,6 @@ func (t *ColumnFamily) Commit(row Persistable) error {
 		return ErrTableNotBound
 	}
 	if !t.IsValidRowType(row) {
-		fmt.Println("Commit invalid")
 		return ErrInvalidType
 	}
 	return t.orm.Commit(t, row, false)

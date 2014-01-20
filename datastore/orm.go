@@ -63,7 +63,7 @@ type Orm struct {
 	*CassandraConn
 	Model         *Schema     // The column families to use in this keyspace.
 	SchemaUpdates *SchemaDiff // The differences found between the existing column families and the given Model.
-	SeqID         *SeqIDGenerator
+	SeqID         SeqIDGenerator
 }
 
 // DialOrm establishes a connection to Cassandra and returns an Orm pointer for storing and loading
@@ -118,16 +118,22 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 	}
 	var seqid *SeqID
 	if cf.Options.IndexBySeqID {
-		s, err := orm.SeqID.New()
-		if err != nil {
-			return err
+		seqid_rv, ok := row_values["SeqID"]
+		if !ok || len(seqid_rv.Value) == 0 {
+			s, err := orm.SeqID.New()
+			if err != nil {
+				return err
+			}
+			seqid = &s
+			b, err := gocql.Marshal(tiVarchar, string(s))
+			if err != nil {
+				return err
+			}
+			row_values["SeqID"] = &RowValue{b, tiVarchar}
+		} else {
+			seqid = new(SeqID)
+			gocql.Unmarshal(tiVarchar, row_values["SeqID"].Value, seqid)
 		}
-		seqid = &s
-		b, err := gocql.Marshal(tiVarchar, string(s))
-		if err != nil {
-			return err
-		}
-		row_values["SeqID"] = &RowValue{b, tiVarchar}
 	}
 	loadedColumns := row.loadedColumns()
 	row_values.subtractUnchanged(loadedColumns)
@@ -176,7 +182,7 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 			return err
 		}
 	}
-	return nil
+	return row.loadedColumns().UnmarshalRow(row)
 }
 
 func buildInsertStatement(cf *ColumnFamily, colnames []string, cas bool) string {
