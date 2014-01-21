@@ -19,6 +19,7 @@ func NewTestOrm(t *testing.T) *TestOrm {
 	if orm.SchemaUpdates, err = DiffLiveSchema(tc.CassandraConn, schema); err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("schema:\n%s", orm.SchemaUpdates)
 	if err = orm.ApplySchemaUpdates(); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,7 @@ func NewTestOrm(t *testing.T) *TestOrm {
 
 func TestCreateAndLoadByKeyAndExists(t *testing.T) {
 	orm := NewTestOrm(t)
-	defer orm.Close()
+	//defer orm.Close()
 
 	cf := (*ColumnFamily)(orm.M.Bags)
 	b, err := cf.Exists("x", 1, true)
@@ -59,7 +60,7 @@ func TestCreateAndLoadByKeyAndExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !rowsEqual(row, row_out) {
-		t.Errorf("\nexpected: %+v\nreceived: %+v", *row, row_out)
+		t.Errorf("\nexpected: %+v\nreceived: %+v", row, row_out)
 	}
 
 	if err := cf.CommitCAS(row); err != ErrAlreadyExists {

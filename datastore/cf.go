@@ -137,9 +137,6 @@ func (t *ColumnFamily) CommitCAS(row Row) error {
 		return ErrInvalidType
 	}
 	// TODO: handle pk changes
-	if len(row.loadedColumns()) > 0 {
-		return ErrAlreadyExists
-	}
 	return t.orm.Commit(t, row, true)
 }
 

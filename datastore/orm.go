@@ -13,51 +13,6 @@ var (
 	ErrInvalidType   = errors.New("invalid row type")
 )
 
-// Persistent is an embeddable struct that provides the ability to persist data to Cassandra. For
-// example:
-//
-//   type Page struct {
-//     datastore.Persistent
-//     Path string
-//     Title string
-//     Body string
-//     Views int64
-//     Public bool
-//   }
-//   var PageCFOptions = datastore.CFOptions{PrimaryKey: []string{"Path"}}
-//   var PageTable = datastore.DefineTable(&Page{}, PageCFOptions)
-//
-// If an empty instance of this struct is passed to DefineTable, then filled in instances of the
-// struct can be saved to and loaded from Cassandra.
-//
-//   page := &Page{Path: "/", Title: "Home Page", Body: "Welcome!", Views: 0, Public: true}
-//   orm.Create(page)
-//
-//   loaded := Page{}
-//   orm.LoadByKey(&loaded, "/")
-type Persistent struct {
-	CF             *ColumnFamily `json:"-"`
-	_loadedColumns RowValues
-}
-
-// A Row is any struct that embeds Persistent. If such a struct is associated with a Table
-// in a Model, then it can be easily persisted to Cassandra.
-type Row interface {
-	GetCF() *ColumnFamily
-	loadedColumns() RowValues
-}
-
-func (s *Persistent) GetCF() *ColumnFamily {
-	return s.CF
-}
-
-func (s *Persistent) loadedColumns() RowValues {
-	if s._loadedColumns == nil {
-		s._loadedColumns = make(RowValues)
-	}
-	return s._loadedColumns
-}
-
 // An Orm binds a Schema to a CassandraConn.
 type Orm struct {
 	*CassandraConn
@@ -113,15 +68,15 @@ func placeholderList(n int) string {
 // Commit writes any modified values in the given row to the given CF.
 func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 	pkdef := cf.Options.PrimaryKey
-	row_values, err := MarshalRow(row)
-	if err != nil {
+	mmap := make(MarshalledMap)
+	if err := row.Marshal(&mmap); err != nil {
 		return err
 	}
 
 	// First allow indexes to update both Cassandra and the Row.
 	b := gocql.NewBatch(gocql.LoggedBatch)
 	for _, idx := range cf.Options.Indexes {
-		idx_stmts, err := idx.Index(cf, row_values)
+		idx_stmts, err := idx.Index(cf, &mmap)
 		if err != nil {
 			return err
 		}
@@ -130,59 +85,45 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 		}
 	}
 	if len(b.Entries) > 0 {
-		if err = orm.Session.ExecuteBatch(b); err != nil {
+		if err := orm.Session.ExecuteBatch(b); err != nil {
 			return err
 		}
 	}
 
-	// Now compute what needs to be written to the Row's CF.
-	loadedColumns := row.loadedColumns()
-	row_values.subtractUnchanged(loadedColumns)
-	newk := make([]string, 0, len(row_values))
-	newv := make([]*RowValue, 0, len(row_values))
-	for k, v := range row_values {
-		newk = append(newk, k)
-		newv = append(newv, v)
-	}
-	if len(newk) == 0 {
-		// nothing to commit
-		return nil
-	}
-
 	// Generate the appropriate CQL.
+	selectedKeys := make([]string, len(cf.Columns))
+	for i, col := range cf.Columns {
+		selectedKeys[i] = col.Name
+	}
 	var stmt string
 	var params []interface{}
 	if cas {
-		stmt = buildInsertStatement(cf, newk)
-		params = make([]interface{}, len(newv))
-		for i, v := range newv {
-			params[i] = v
-		}
+		stmt = buildInsertStatement(cf, selectedKeys)
+		params = mmap.InterfacesFor(selectedKeys...)
 	} else {
-		stmt = buildUpdateStatement(cf, newk)
-		pkvals := make([]interface{}, len(pkdef))
-		for i, k := range pkdef {
-			pkvals[i] = loadedColumns[k]
-			delete(row_values, k)
+		// For an update, it makes no sense to treat primary keys as dirty.
+		for _, k := range pkdef {
+			mmap[k].Dirty = false
 		}
-		params = make([]interface{}, len(newv)+len(pkvals))
-		for i, v := range newv {
-			params[i] = v
+		selectedKeys = mmap.DirtyKeys()
+		stmt = buildUpdateStatement(cf, selectedKeys)
+		params = mmap.InterfacesFor(selectedKeys...)
+		for _, v := range mmap.InterfacesFor(pkdef...) {
+			params = append(params, v)
 		}
-		copy(params[len(newv):], pkvals)
 	}
 
 	// Apply the computed CQL and check results.
 	q := orm.Query(stmt, params...)
+
 	if cas {
 		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
 		// indicating success, and a row with the values that were committed. We don't need this
-		// response, but we need to supply RowValue pointers for the returned columns anyway.
-		interfaces := make([]interface{}, len(newk))
-		for i, _ := range newk {
-			interfaces[i] = &RowValue{}
-		}
-		if applied, err := q.ScanCAS(interfaces...); !applied || err != nil {
+		// response, but we need to supply MarshalledValue pointers for the returned columns anyway.
+		// Despite this, the values pointed to will not be filled in except in the case of error.
+		casmap := make(MarshalledMap)
+		pointers := casmap.PointersTo(selectedKeys...)
+		if applied, err := q.ScanCAS(pointers...); !applied || err != nil {
 			if err == nil {
 				err = ErrAlreadyExists
 			}
@@ -193,13 +134,8 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 			return err
 		}
 	}
-	for i, col := range newk {
-		loadedColumns[col] = newv[i]
-	}
-	if err = row.loadedColumns().UnmarshalRow(row); err != nil {
-		return err
-	}
-	return nil
+	// Make the row unmarshal its given values, in case it is caching upon load.
+	return row.Unmarshal(&mmap)
 }
 
 func buildInsertStatement(cf *ColumnFamily, colnames []string) string {
@@ -240,10 +176,11 @@ func (orm *Orm) LoadByKey(cf *ColumnFamily, row Row, key ...interface{}) error {
 	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
 		strings.Join(colnames, ", "), cf.Name, strings.Join(rules, " AND "))
 	q := orm.Query(stmt, key...)
-	if err := q.Scan(row.loadedColumns().receiverInterfaces(colnames)...); err != nil {
+	mmap := make(MarshalledMap)
+	if err := q.Scan(mmap.PointersTo(colnames...)...); err != nil {
 		return err
 	}
-	return row.loadedColumns().UnmarshalRow(row)
+	return row.Unmarshal(&mmap)
 }
 
 // Exists checks if a row exists in a given row's column family.

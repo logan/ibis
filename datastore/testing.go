@@ -14,7 +14,7 @@ var (
 )
 
 type BagOfManyTypes struct {
-	Persistent
+	ReflectedRow
 	A bool
 	B float64
 	C int64
@@ -28,7 +28,7 @@ type BagOfManyTypesTable ColumnFamily
 func (t *BagOfManyTypesTable) NewRow() Row {
 	row := &BagOfManyTypes{}
 	row.CF = (*ColumnFamily)(t)
-	return row
+	return row.Reflect(row)
 }
 
 func (t *BagOfManyTypesTable) ConfigureCF(options *CFOptions) {
@@ -96,24 +96,27 @@ func rowsEqual(row1, row2 Row) bool {
 	if type1 != reflect.TypeOf(row2) {
 		return false
 	}
-	p1 := reflect.ValueOf(row1).Elem().FieldByName("Persistent").Interface().(Persistent)
-	p2 := reflect.ValueOf(row2).Elem().FieldByName("Persistent").Interface().(Persistent)
-	if len(p1._loadedColumns) != len(p2._loadedColumns) {
+	p1 := reflect.ValueOf(row1).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
+	p2 := reflect.ValueOf(row2).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
+	if len(*p1.loaded) != len(*p2.loaded) {
 		return false
 	}
-	for k, v1 := range p1._loadedColumns {
-		v2, ok := p2._loadedColumns[k]
-		if !ok || !bytes.Equal(v1.Value, v2.Value) {
+	for k, v1 := range *p1.loaded {
+		v2, ok := (*p2.loaded)[k]
+		if !ok || !bytes.Equal(v1.Bytes, v2.Bytes) {
 			return false
 		}
 	}
-	rv1, err := MarshalRow(row1)
-	if err != nil {
+	rv1 := make(MarshalledMap)
+	if err := row1.Marshal(&rv1); err != nil {
 		return false
 	}
-	rv2, err := MarshalRow(row2)
-	if err != nil {
+	rv2 := make(MarshalledMap)
+	if err := row2.Marshal(&rv2); err != nil {
 		return false
 	}
-	return reflect.DeepEqual(rv1, rv2)
+	if !reflect.DeepEqual(rv1, rv2) {
+		return false
+	}
+	return true
 }

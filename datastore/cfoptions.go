@@ -9,7 +9,7 @@ type CFIndexStatement struct {
 
 type CFIndex interface {
 	// TODO: remove cf arg?
-	Index(cf *ColumnFamily, rowValues RowValues) ([]CFIndexStatement, error)
+	Index(*ColumnFamily, *MarshalledMap) ([]CFIndexStatement, error)
 	CFs() []*ColumnFamily
 }
 

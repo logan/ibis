@@ -11,8 +11,8 @@ var (
 	ErrNoSeqIDListing = errors.New("table has no seqid listing")
 )
 
-type SeqIDPersistent struct {
-	Persistent
+type SeqIDRow struct {
+	ReflectedRow
 	SeqID SeqID
 }
 
@@ -32,11 +32,11 @@ func (idx *seqIDIndexer) CFs() []*ColumnFamily {
 	return []*ColumnFamily{(*ColumnFamily)(idx)}
 }
 
-func (idx *seqIDIndexer) Index(cf *ColumnFamily, rowValues RowValues) ([]CFIndexStatement, error) {
+func (idx *seqIDIndexer) Index(cf *ColumnFamily, mmap *MarshalledMap) ([]CFIndexStatement, error) {
 	var seqid SeqID
 	var err error
-	seqid_rv, ok := rowValues["SeqID"]
-	if !ok || len(seqid_rv.Value) == 0 {
+	seqid_rv, ok := (*mmap)["SeqID"]
+	if !ok || len(seqid_rv.Bytes) == 0 {
 		seqid, err = cf.orm.SeqID.New()
 		if err != nil {
 			return nil, err
@@ -45,9 +45,9 @@ func (idx *seqIDIndexer) Index(cf *ColumnFamily, rowValues RowValues) ([]CFIndex
 		if err != nil {
 			return nil, err
 		}
-		rowValues["SeqID"] = &RowValue{b, tiVarchar}
+		(*mmap)["SeqID"] = &MarshalledValue{Bytes: b, TypeInfo: tiVarchar}
 	} else {
-		gocql.Unmarshal(tiVarchar, seqid_rv.Value, &seqid)
+		gocql.Unmarshal(tiVarchar, seqid_rv.Bytes, &seqid)
 	}
 
 	var pkPart string
@@ -57,21 +57,16 @@ func (idx *seqIDIndexer) Index(cf *ColumnFamily, rowValues RowValues) ([]CFIndex
 	stmt := fmt.Sprintf("INSERT INTO %s (Interval, SeqID%s) VALUES (%s)",
 		idx.Name, pkPart, placeholderList(len(idx.Columns)))
 
-	var values []*RowValue
+	var values []interface{}
 	if cf.Options.PrimaryKey[0] == "SeqID" {
-		values = make([]*RowValue, 0)
+		values = make([]interface{}, 0)
 	} else {
-		values = make([]*RowValue, len(cf.Options.PrimaryKey))
-		for i, pk_name := range cf.Options.PrimaryKey {
-			values[i] = rowValues[pk_name]
-		}
+		values = mmap.InterfacesFor(cf.Options.PrimaryKey...)
 	}
 	params := make([]interface{}, len(values)+2)
 	params[0] = interval(seqid)
 	params[1] = seqid
-	for i, v := range values {
-		params[i+2] = v
-	}
+	copy(params[2:], values)
 	return []CFIndexStatement{CFIndexStatement{stmt, params}}, nil
 }
 
@@ -205,7 +200,7 @@ func (iter *SeqIDListingIter) scanInterval(row Row) {
 			pkLen = 0
 		}
 		buf := make([][]interface{}, iter.ChunkSize)
-		rvs := make([][]RowValue, iter.ChunkSize)
+		rvs := make([][]MarshalledValue, iter.ChunkSize)
 		buf_i := 0
 
 		for {
@@ -227,7 +222,7 @@ func (iter *SeqIDListingIter) scanInterval(row Row) {
 				buf[buf_i] = make([]interface{}, 2+pkLen)
 				buf[buf_i][0] = &interval
 				buf[buf_i][1] = &seqid
-				rvs[buf_i] = make([]RowValue, pkLen)
+				rvs[buf_i] = make([]MarshalledValue, pkLen)
 				if !pkIsSeqID {
 					for i, _ := range iter.rowcf.Options.PrimaryKey {
 						buf[buf_i][i+2] = &rvs[buf_i][i]

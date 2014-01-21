@@ -1,7 +1,6 @@
 package datastore
 
 import "fmt"
-import "reflect"
 import "strconv"
 import "testing"
 
@@ -17,7 +16,7 @@ func (g *testSeqIDGenerator) CurrentInterval() string {
 }
 
 type seqidTestP struct {
-	SeqIDPersistent
+	SeqIDRow
 	Name string
 }
 
@@ -33,13 +32,13 @@ func (t *seqidTestT) CF() *ColumnFamily {
 }
 
 func (t *seqidTestT) NewRow() Row {
-	return t.NewP()
+	p := &seqidTestP{}
+	p.CF = t.CF()
+	return p.Reflect(p)
 }
 
 func (t *seqidTestT) NewP() *seqidTestP {
-	p := &seqidTestP{}
-	p.CF = t.CF()
-	return p
+	return t.NewRow().(*seqidTestP)
 }
 
 type seqidTestO struct {
@@ -127,7 +126,7 @@ func TestSeqIDListing(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatal(fmt.Sprintf("expected exactly one item, found %d (%+v)", len(items), items))
 	}
-	if !reflect.DeepEqual(p, items[0]) {
+	if !rowsEqual(p, items[0]) {
 		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", p, items[0]))
 	}
 
@@ -149,10 +148,10 @@ func TestSeqIDListing(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatal(fmt.Sprintf("expected exactly two items, found %d (%+v)", len(items), items))
 	}
-	if !reflect.DeepEqual(q, items[0]) {
+	if !rowsEqual(q, items[0]) {
 		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", q, items[0]))
 	}
-	if !reflect.DeepEqual(p, items[1]) {
+	if !rowsEqual(p, items[1]) {
 		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", p, items[1]))
 	}
 
@@ -163,7 +162,7 @@ func TestSeqIDListing(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatal(fmt.Sprintf("expected exactly one item, found %d (%+v)", len(items), items))
 	}
-	if !reflect.DeepEqual(q, items[0]) {
+	if !rowsEqual(q, items[0]) {
 		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", q, items[0]))
 	}
 
@@ -175,7 +174,7 @@ func TestSeqIDListing(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatal(fmt.Sprintf("expected exactly one item, found %d (%+v)", len(items), items))
 	}
-	if !reflect.DeepEqual(p, items[0]) {
+	if !rowsEqual(p, items[0]) {
 		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", p, items[0]))
 	}
 }
