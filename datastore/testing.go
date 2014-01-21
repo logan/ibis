@@ -25,7 +25,7 @@ type BagOfManyTypes struct {
 
 type BagOfManyTypesTable ColumnFamily
 
-func (t *BagOfManyTypesTable) NewRow() Persistable {
+func (t *BagOfManyTypesTable) NewRow() Row {
 	row := &BagOfManyTypes{}
 	row.CF = (*ColumnFamily)(t)
 	return row
@@ -91,7 +91,7 @@ func (tc *TestConn) Close() error {
 	return nil
 }
 
-func rowsEqual(row1 Persistable, row2 Persistable) bool {
+func rowsEqual(row1, row2 Row) bool {
 	type1 := reflect.TypeOf(row1)
 	if type1 != reflect.TypeOf(row2) {
 		return false

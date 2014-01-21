@@ -32,7 +32,7 @@ func (t *seqidTestT) CF() *ColumnFamily {
 	return (*ColumnFamily)(t)
 }
 
-func (t *seqidTestT) NewRow() Persistable {
+func (t *seqidTestT) NewRow() Row {
 	return t.NewP()
 }
 

@@ -114,7 +114,7 @@ type SeqIDListingIter struct {
 	idxcf         *ColumnFamily
 	keysRetrieved int
 	interval      string
-	rowchan       chan Persistable
+	rowchan       chan Row
 	keychan       chan []interface{}
 	exhausted     bool
 }
@@ -134,7 +134,7 @@ func IterSeqIDListing(table ReflectableColumnFamily) *SeqIDListingIter {
 // Next reads the next item from an iteration over a SeqIDListing. The item is read into the given
 // row object. If this function returns false, compare iter.Err to nil to determine whether an error
 // occurred or the iteration over the listing was merely exhausted.
-func (iter *SeqIDListingIter) Next(row Persistable) (ok bool) {
+func (iter *SeqIDListingIter) Next(row Row) (ok bool) {
 	if iter.Err != nil {
 		return false
 	}
@@ -152,12 +152,12 @@ func (iter *SeqIDListingIter) Next(row Persistable) (ok bool) {
 	return
 }
 
-func (iter *SeqIDListingIter) scanChunk(row Persistable) {
+func (iter *SeqIDListingIter) scanChunk(row Row) {
 	if iter.ChunkSize == 0 {
 		iter.ChunkSize = 10000
 	}
 
-	iter.rowchan = make(chan Persistable, iter.ChunkSize)
+	iter.rowchan = make(chan Row, iter.ChunkSize)
 
 	go func() {
 		// TODO: do batch lookups
@@ -190,7 +190,7 @@ func (iter *SeqIDListingIter) scanChunk(row Persistable) {
 	}()
 }
 
-func (iter *SeqIDListingIter) scanInterval(row Persistable) {
+func (iter *SeqIDListingIter) scanInterval(row Row) {
 	iter.keychan = make(chan []interface{}, iter.ChunkSize)
 
 	go func() {

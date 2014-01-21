@@ -85,8 +85,8 @@ var column_validators = map[string]string{
 	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
 }
 
-// MarshalRow produces a RowValues map from a Persistable struct with a registered Table.
-func MarshalRow(row Persistable) (result RowValues, err error) {
+// MarshalRow produces a RowValues map from a Row struct with a registered Table.
+func MarshalRow(row Row) (result RowValues, err error) {
 	cf := row.GetCF()
 	value := reflect.Indirect(reflect.ValueOf(row))
 	result = make(RowValues)
@@ -103,8 +103,8 @@ func MarshalRow(row Persistable) (result RowValues, err error) {
 	return
 }
 
-// UnmarshalRow fills in a Persistable struct with a registered Table.
-func (rv RowValues) UnmarshalRow(row Persistable) error {
+// UnmarshalRow fills in a Row struct with a registered Table.
+func (rv RowValues) UnmarshalRow(row Row) error {
 	value := reflect.Indirect(reflect.ValueOf(row))
 	if value.Type().Kind() != reflect.Struct {
 		return ErrInvalidRowType

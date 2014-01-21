@@ -102,8 +102,8 @@ func (t *ColumnFamily) IsBound() bool {
 	return t.orm != nil
 }
 
-// IsValidType returns true if the given Persistable is registered with the column family.
-func (t *ColumnFamily) IsValidRowType(row Persistable) bool {
+// IsValidType returns true if the given Row is registered with the column family.
+func (t *ColumnFamily) IsValidRowType(row Row) bool {
 	return t == row.GetCF()
 }
 
@@ -115,8 +115,8 @@ func (t *ColumnFamily) Exists(key ...interface{}) (bool, error) {
 	return t.orm.Exists(t, key...)
 }
 
-// LoadByKey loads a row from the table by primary key and stores it in the given Persistable.
-func (t *ColumnFamily) LoadByKey(row Persistable, key ...interface{}) error {
+// LoadByKey loads a row from the table by primary key and stores it in the given Row.
+func (t *ColumnFamily) LoadByKey(row Row, key ...interface{}) error {
 	if !t.IsBound() {
 		return ErrTableNotBound
 	}
@@ -129,7 +129,7 @@ func (t *ColumnFamily) LoadByKey(row Persistable, key ...interface{}) error {
 // CommitCAS inserts a filled-in "row" into the table's column family. An error is returned if the
 // type of the row is not compatible with the one registered for the table, or if a row already
 // exists with the same primary key.
-func (t *ColumnFamily) CommitCAS(row Persistable) error {
+func (t *ColumnFamily) CommitCAS(row Row) error {
 	if !t.IsBound() {
 		return ErrTableNotBound
 	}
@@ -145,7 +145,7 @@ func (t *ColumnFamily) CommitCAS(row Persistable) error {
 
 // Commit writes any modified values in a loaded "row" to the table's column family. An error is
 // returned if the type of the row is not compatible with the one registered for the table.
-func (t *ColumnFamily) Commit(row Persistable) error {
+func (t *ColumnFamily) Commit(row Row) error {
 	if !t.IsBound() {
 		return ErrTableNotBound
 	}

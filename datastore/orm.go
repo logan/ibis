@@ -40,9 +40,9 @@ type Persistent struct {
 	_loadedColumns RowValues
 }
 
-// A Persistable is any struct that embeds Persistent. If such a struct is associated with a Table
+// A Row is any struct that embeds Persistent. If such a struct is associated with a Table
 // in a Model, then it can be easily persisted to Cassandra.
-type Persistable interface {
+type Row interface {
 	GetCF() *ColumnFamily
 	loadedColumns() RowValues
 }
@@ -67,7 +67,7 @@ type Orm struct {
 }
 
 // DialOrm establishes a connection to Cassandra and returns an Orm pointer for storing and loading
-// Persistables according to a given model.
+// Rows according to a given model.
 func DialOrm(config CassandraConfig, model *Schema) (*Orm, error) {
 	conn, err := DialCassandra(config)
 	if err != nil {
@@ -111,14 +111,14 @@ func placeholderList(n int) string {
 }
 
 // Commit writes any modified values in the given row to the given CF.
-func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
+func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 	pkdef := cf.Options.PrimaryKey
 	row_values, err := MarshalRow(row)
 	if err != nil {
 		return err
 	}
 
-	// First allow indexes to update both Cassandra and the Persistable.
+	// First allow indexes to update both Cassandra and the Row.
 	b := gocql.NewBatch(gocql.LoggedBatch)
 	for _, idx := range cf.Options.Indexes {
 		idx_stmts, err := idx.Index(cf, row_values)
@@ -135,7 +135,7 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Persistable, cas bool) error {
 		}
 	}
 
-	// Now compute what needs to be written to the Persistable's CF.
+	// Now compute what needs to be written to the Row's CF.
 	loadedColumns := row.loadedColumns()
 	row_values.subtractUnchanged(loadedColumns)
 	newk := make([]string, 0, len(row_values))
@@ -225,7 +225,7 @@ func buildUpdateStatement(cf *ColumnFamily, colnames []string) string {
 
 // LoadByKey loads data from a row's column family into that row. The row is selected by the given
 // key values, which must correspond to the column family's defined primary key.
-func (orm *Orm) LoadByKey(cf *ColumnFamily, row Persistable, key ...interface{}) error {
+func (orm *Orm) LoadByKey(cf *ColumnFamily, row Row, key ...interface{}) error {
 	colnames := make([]string, len(cf.Columns))
 	for i, col := range cf.Columns {
 		colnames[i] = col.Name

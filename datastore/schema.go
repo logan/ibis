@@ -47,7 +47,7 @@ func (s *Schema) IsBound() bool {
 
 type ReflectableColumnFamily interface {
 	ConfigureCF(*CFOptions)
-	NewRow() Persistable
+	NewRow() Row
 }
 
 func ReflectSchemaFrom(model interface{}) *Schema {
