@@ -10,6 +10,7 @@ type CFOptions struct {
 	onCreateHooks []OnCreateHook // If given, will be called immediately after table creation.
 	typeID        int
 	ctx           map[interface{}]interface{}
+	indexMap      map[string]*Index
 }
 
 func NewCFOptions(cf *ColumnFamily) *CFOptions {
@@ -17,6 +18,7 @@ func NewCFOptions(cf *ColumnFamily) *CFOptions {
 	o.Indexes = make([]CFIndexer, 0)
 	o.ctx = make(map[interface{}]interface{})
 	o.onCreateHooks = make([]OnCreateHook, 0)
+	o.indexMap = make(map[string]*Index)
 	return o
 }
 
@@ -55,8 +57,9 @@ func (o *CFOptions) Key(keys ...string) *CFOptions {
 	return o
 }
 
-func (o *CFOptions) Index(index CFIndexer) *CFOptions {
+func (o *CFOptions) Index(index *Index) *CFOptions {
 	o.Indexes = append(o.Indexes, index)
+	o.indexMap[index.IndexName()] = index
 	return o
 }
 
@@ -67,7 +70,6 @@ func (o *CFOptions) OnCreate(hook OnCreateHook) *CFOptions {
 
 func (options *CFOptions) AddIndex(indexer SeqIDIndexer) *CFOptions {
 	idx := &Index{IndexedCF: options.CF, Indexer: indexer}
-	options.Set(SEQID, idx)
 	options.Index(idx)
 	return options
 }

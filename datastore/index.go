@@ -42,7 +42,6 @@ func (entry *SeqIDIndexEntry) partition() string {
 	if len(entry.PartitionParts) == 0 {
 		return interval(entry.SeqID)
 	}
-	// TODO: escape each part so it doesn't matter if they contain '~'
 	return strings.Join(entry.PartitionParts, "~") + "~" + interval(entry.SeqID)
 }
 
@@ -55,10 +54,15 @@ func (entry *SeqIDIndexEntry) Marshal(mmap MarshalledMap) (err error) {
 	if mmap["Interval"].Bytes, err = gocql.Marshal(tiVarchar, entry.partition()); err != nil {
 		return
 	}
+
+	// SeqID must be zero-padded to a length of 13 to collate appropriately.
 	mmap["SeqID"] = &MarshalledValue{TypeInfo: tiVarchar, Dirty: true}
-	if mmap["SeqID"].Bytes, err = gocql.Marshal(tiVarchar, string(entry.SeqID)); err != nil {
+	mmap["SeqID"].Bytes, err = gocql.Marshal(tiVarchar, fmt.Sprintf("%013s", entry.SeqID))
+	if err != nil {
 		return
 	}
+
+	// Fill in foreign key.
 	for k, v := range entry.Key {
 		mmap[k] = v
 	}
@@ -93,6 +97,19 @@ func (entry *SeqIDIndexEntry) Unmarshal(mmap MarshalledMap) error {
 type SeqIDIndexer interface {
 	SeqIDIndex(MarshalledMap, *SeqIDIndexEntry) error
 	IndexName() string
+	PartitionKeys() []string
+}
+
+var hexDigits = []byte("0123456789abcdef")
+
+func hexenc(bs []byte) string {
+	// format each byte as two hexadecimal digits
+	enc := make([]byte, len(bs)*2)
+	for i, b := range bs {
+		enc[2*i] = hexDigits[b/16]
+		enc[2*i+1] = hexDigits[b%16]
+	}
+	return string(enc)
 }
 
 type byColsIndexer struct {
@@ -113,6 +130,10 @@ func (bc *byColsIndexer) IndexName() string {
 		return "BySeqID"
 	}
 	return "By" + strings.Join(bc.columns, "")
+}
+
+func (bc *byColsIndexer) PartitionKeys() []string {
+	return bc.columns
 }
 
 func (bc *byColsIndexer) SeqIDIndex(mmap MarshalledMap, entry *SeqIDIndexEntry) error {
@@ -138,6 +159,14 @@ func (bc *byColsIndexer) SeqIDIndex(mmap MarshalledMap, entry *SeqIDIndexEntry) 
 		if k != "SeqID" {
 			entry.Key[k] = mmap[k]
 		}
+	}
+	entry.PartitionParts = make([]string, len(bc.columns))
+	for i, colname := range bc.columns {
+		var s string
+		if mv, ok := mmap[colname]; ok && mv != nil {
+			s = hexenc(mv.Bytes)
+		}
+		entry.PartitionParts[i] = s
 	}
 	return nil
 }
@@ -187,6 +216,14 @@ func (idx *Index) Index(cf *ColumnFamily, mmap MarshalledMap) ([]*CQL, error) {
 	return idx.CF.PrepareCommit(entry)
 }
 
+func (idx *Index) Iter() *IndexIter {
+	return &IndexIter{
+		rowcf:         idx.IndexedCF,
+		idxcf:         idx.CF,
+		partitionKeys: idx.Indexer.PartitionKeys(),
+	}
+}
+
 func insertSeqIDListingSentinel(orm *Orm, table *ColumnFamily) error {
 	interval := orm.SeqID.CurrentInterval()
 	q := orm.Query(fmt.Sprintf("INSERT INTO %s (Interval, SeqID) VALUES (?, ?)", table.Name),
@@ -194,37 +231,56 @@ func insertSeqIDListingSentinel(orm *Orm, table *ColumnFamily) error {
 	return q.Exec()
 }
 
-type SeqIDListingIter struct {
+type IndexIter struct {
+	// need something in here to represent which partitions of a compound index to scan
+	// probably just prefix string, but need an API to give it
+	// probably in Iter(), but it probably ought to type check
 	After         SeqID
+	LowerBound    SeqID
 	Limit         int
 	ChunkSize     int
 	Err           error
-	rcf           ReflectableColumnFamily
 	rowcf         *ColumnFamily
 	idxcf         *ColumnFamily
 	keysRetrieved int
+	partitionKeys []string
+	prefix        string
 	interval      string
 	rowchan       chan MarshalledMap
 	keychan       chan SeqIDIndexEntry
 	exhausted     bool
 }
 
-// IterSeqIDListing creates a listing iterator over a bound table with a seqid listing.
-func IterSeqIDListing(table ReflectableColumnFamily) *SeqIDListingIter {
-	cf := table.NewRow().GetCF()
-	if !cf.IsBound() {
-		return &SeqIDListingIter{Err: ErrTableNotBound}
+func (iter *IndexIter) marshalPartitionPart(col *Column, part interface{}) string {
+	b, err := gocql.Marshal(col.typeInfo, part)
+	if err != nil {
+		iter.Err = err
+		return ""
 	}
-	if idx, ok := cf.Options.Get(SEQID).(*Index); ok {
-		return &SeqIDListingIter{rcf: table, rowcf: cf, idxcf: (*ColumnFamily)(idx.CF)}
+	return hexenc(b)
+}
+
+func (iter *IndexIter) By(where ...interface{}) *IndexIter {
+	if len(where) > 0 {
+		parts := make([]string, len(where))
+		for i, x := range where {
+			if iter.Err == nil && i < len(iter.partitionKeys) {
+				for _, col := range iter.rowcf.Columns {
+					if col.Name == iter.partitionKeys[i] {
+						parts[i] = iter.marshalPartitionPart(&col, x)
+					}
+				}
+			}
+		}
+		iter.prefix = strings.Join(parts, "~") + "~"
 	}
-	return &SeqIDListingIter{Err: ErrNoSeqIDListing}
+	return iter
 }
 
 // Next reads the next item from an iteration over a SeqIDListing. The item is read into the given
 // row object. If this function returns false, compare iter.Err to nil to determine whether an error
 // occurred or the iteration over the listing was merely exhausted.
-func (iter *SeqIDListingIter) Next(row Row) bool {
+func (iter *IndexIter) Next(row Row) bool {
 	if iter.Err != nil {
 		return false
 	}
@@ -242,7 +298,7 @@ func (iter *SeqIDListingIter) Next(row Row) bool {
 	return false
 }
 
-func (iter *SeqIDListingIter) scanChunk() {
+func (iter *IndexIter) scanChunk() {
 	if iter.ChunkSize == 0 {
 		iter.ChunkSize = 10000
 	}
@@ -275,13 +331,13 @@ func (iter *SeqIDListingIter) scanChunk() {
 	}()
 }
 
-func (iter *SeqIDListingIter) scanInterval() {
+func (iter *IndexIter) scanInterval() {
 	iter.keychan = make(chan SeqIDIndexEntry, iter.ChunkSize)
 
 	go func() {
 		defer close(iter.keychan)
 
-		for {
+		for !iter.exhausted {
 			var limit int
 			if iter.Limit != 0 {
 				limit = iter.Limit - iter.keysRetrieved
@@ -318,6 +374,9 @@ func (iter *SeqIDListingIter) scanInterval() {
 				// abort with error
 				return
 			}
+			if iter.interval == "0" {
+				iter.exhausted = true
+			}
 			iter.interval = decrInterval(iter.interval)
 			if iter.Limit > 0 && iter.keysRetrieved >= iter.Limit {
 				iter.exhausted = true
@@ -327,7 +386,7 @@ func (iter *SeqIDListingIter) scanInterval() {
 	return
 }
 
-func (iter *SeqIDListingIter) queryCurrentInterval(limit int) *CQLIter {
+func (iter *IndexIter) queryCurrentInterval(limit int) *CQLIter {
 	if iter.interval == "" {
 		if iter.After == "" {
 			iter.interval = iter.rowcf.orm.SeqID.CurrentInterval()
@@ -339,7 +398,17 @@ func (iter *SeqIDListingIter) queryCurrentInterval(limit int) *CQLIter {
 
 	// TODO: support compound partitions
 	cql := NewSelect(iter.idxcf)
-	cql.Where("Interval = ?", iter.interval).Where("SeqID < ?", iter.After)
+	cql.Where("Interval = ?", iter.prefix+iter.interval)
+	cql.Where("SeqID < ?", fmt.Sprintf("%013s", iter.After))
 	cql.OrderBy("SeqID DESC").Limit(limit)
 	return cql.Query().Iter()
+}
+
+func IndexBy(t *ColumnFamily, cols ...string) *Index {
+	idx, _ := t.Options.indexMap["By"+strings.Join(cols, "")]
+	return idx
+}
+
+func IndexBySeqID(t *ColumnFamily) *Index {
+	return IndexBy(t, "SeqID")
 }

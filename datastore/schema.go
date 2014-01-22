@@ -14,7 +14,10 @@ type Schema struct {
 
 // NewSchema returns a new, empty schema.
 func NewSchema() *Schema {
-	return &Schema{CFs: make(Keyspace), nextTypeID: 1}
+	return &Schema{
+		CFs:        make(Keyspace),
+		nextTypeID: 1,
+	}
 }
 
 // AddCF adds a column family definition to the schema.
@@ -77,4 +80,14 @@ func ReflectSchemaFrom(model interface{}) *Schema {
 		}
 	}
 	return schema
+}
+
+func (s *Schema) IndexBy(rcf ReflectableColumnFamily, cols ...string) *Index {
+	// TODO: find a way to get to the cf without making a row
+	row := rcf.NewRow()
+	return IndexBy(row.GetCF(), cols...)
+}
+
+func (s *Schema) IndexBySeqID(rcf ReflectableColumnFamily) *Index {
+	return s.IndexBy(rcf, "SeqID")
 }

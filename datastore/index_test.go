@@ -4,82 +4,31 @@ import "fmt"
 import "strconv"
 import "testing"
 
-type testSeqIDGenerator uint64
-
-func (g *testSeqIDGenerator) New() (SeqID, error) {
-	*g++
-	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
+type indexTester interface {
+	setSeqIDInterval(string)
+	tearDown()
+	scanBySeqID() indexScanTester
+	scanBy(...string) indexScanTester
+	newRow() Row
+	makeRow(string, int64, bool) (Row, error)
 }
 
-func (g *testSeqIDGenerator) CurrentInterval() string {
-	return interval(SeqID(strconv.FormatUint(uint64(*g), 36)))
+type indexScanTester interface {
+	where(...interface{}) indexScanTester
+	expect(string, int, ...Row) (string, bool)
 }
 
-type seqidTestP struct {
-	SeqIDRow
-	Name string
+type indexTestEnv struct {
+	orm   *indexTestOrm
+	seqid indexTestSeqIDGenerator
 }
 
-type seqidTestT ColumnFamily
-
-func (t *seqidTestT) ConfigureCF(options *CFOptions) {
-	options.Key("Name")
-	options.AddIndexBySeqID()
-}
-
-func (t *seqidTestT) CF() *ColumnFamily {
-	return (*ColumnFamily)(t)
-}
-
-func (t *seqidTestT) NewRow() Row {
-	p := &seqidTestP{}
-	p.CF = t.CF()
-	return p.Reflect(p)
-}
-
-func (t *seqidTestT) NewP() *seqidTestP {
-	return t.NewRow().(*seqidTestP)
-}
-
-type seqidTestO struct {
-	*Orm
-	*TestConn
-	tsg testSeqIDGenerator
-	M   struct {
-		T *seqidTestT
-	}
-}
-
-type seqidTestIter struct {
-	*SeqIDListingIter
-}
-
-func (i *seqidTestIter) Next(p *seqidTestP) bool {
-	return i.SeqIDListingIter.Next(p)
-}
-
-func (i *seqidTestIter) Error() error {
-	return i.SeqIDListingIter.Err
-}
-
-func seqidTestAll(t *seqidTestT, after string, limit int) ([]*seqidTestP, error) {
-	items := make([]*seqidTestP, 0)
-	i := &seqidTestIter{IterSeqIDListing(t)}
-	i.After = SeqID(after)
-	i.Limit = limit
-	p := t.NewP()
-	for i.Next(p) {
-		items = append(items, p)
-		p = t.NewP()
-	}
-	return items, i.Error()
-}
-
-func newSeqidTestO(t *testing.T) *seqidTestO {
-	sto := &seqidTestO{}
+func newIndexTestEnv(t *testing.T) indexTester {
+	env := &indexTestEnv{}
+	env.orm = &indexTestOrm{}
 	tc := NewTestConn(t)
-	schema := ReflectSchemaFrom(&sto.M)
-	orm := &Orm{CassandraConn: tc.CassandraConn, Model: schema, SeqID: &sto.tsg}
+	schema := ReflectSchemaFrom(&env.orm.M)
+	orm := &Orm{CassandraConn: tc.CassandraConn, Model: schema, SeqID: &env.seqid}
 	schema.Bind(orm)
 	var err error
 	if orm.SchemaUpdates, err = DiffLiveSchema(tc.CassandraConn, schema); err != nil {
@@ -88,93 +37,220 @@ func newSeqidTestO(t *testing.T) *seqidTestO {
 	if err = orm.ApplySchemaUpdates(); err != nil {
 		t.Fatal(err)
 	}
-	sto.Orm = orm
-	sto.TestConn = tc
-	return sto
+	env.orm.Orm = orm
+	env.orm.TestConn = tc
+	return env
 }
 
-func (o *seqidTestO) Close() {
-	o.Orm.Close()
+func (env *indexTestEnv) setSeqIDInterval(interval string) {
+	s := intervalToSeqID(interval)
+	i, _ := strconv.ParseUint(string(s), 36, 64)
+	env.seqid = indexTestSeqIDGenerator(i)
+}
+
+func (env *indexTestEnv) tearDown() {
+	env.orm.Orm.Close()
+}
+
+func (env *indexTestEnv) newRow() Row {
+	return env.orm.M.T.NewRow()
+}
+
+func (env *indexTestEnv) makeRow(name string, number int64, status bool) (Row, error) {
+	p := env.orm.M.T.NewP()
+	p.Name = name
+	p.Number = number
+	p.Status = status
+	return p, env.orm.M.T.CF().CommitCAS(p)
+}
+
+func (env *indexTestEnv) scanBySeqID() indexScanTester {
+	return newIndexScanTest(env, env.orm.Orm.Model.IndexBySeqID(env.orm.M.T))
+}
+
+func (env *indexTestEnv) scanBy(cols ...string) indexScanTester {
+	return newIndexScanTest(env, env.orm.Orm.Model.IndexBy(env.orm.M.T, cols...))
+}
+
+type indexTestOrm struct {
+	*Orm
+	*TestConn
+	M struct {
+		T *indexTestT
+	}
+}
+
+// Define a seqid generator that we can control, to force particular intervals in the index.
+type indexTestSeqIDGenerator uint64
+
+func (g *indexTestSeqIDGenerator) New() (SeqID, error) {
+	*g++
+	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
+}
+
+func (g *indexTestSeqIDGenerator) CurrentInterval() string {
+	return interval(SeqID(strconv.FormatUint(uint64(*g), 36)))
+}
+
+// Define a trivial model for testing a seqid index and a couple of compound indexes.
+type indexTestP struct {
+	SeqIDRow
+	Name   string
+	Number int64
+	Status bool
+}
+
+func (p *indexTestP) String() string {
+	return fmt.Sprintf("(%s:%s,%d,%v)", p.SeqID, p.Name, p.Number, p.Status)
+}
+
+type indexTestT ColumnFamily
+
+func (t *indexTestT) ConfigureCF(options *CFOptions) {
+	options.Key("Name")
+	options.AddIndexBySeqID()
+	options.AddIndexBy("Number")
+	options.AddIndexBy("Number", "Status")
+}
+
+func (t *indexTestT) CF() *ColumnFamily {
+	return (*ColumnFamily)(t)
+}
+
+func (t *indexTestT) NewRow() Row {
+	p := &indexTestP{}
+	p.CF = t.CF()
+	return p.Reflect(p)
+}
+
+func (t *indexTestT) NewP() *indexTestP {
+	return t.NewRow().(*indexTestP)
+}
+
+// Define convenience functions for iterating over one of our indexes.
+type indexScanTest struct {
+	env  indexTester
+	iter *IndexIter
+}
+
+func newIndexScanTest(env indexTester, idx *Index) indexScanTester {
+	return &indexScanTest{env, idx.Iter()}
+}
+
+func (scan *indexScanTest) where(w ...interface{}) indexScanTester {
+	scan.iter.LowerBound = "0"
+	scan.iter.By(w...)
+	return scan
+}
+
+func (scan *indexScanTest) expect(after string, limit int, expected ...Row) (string, bool) {
+	received := make([]Row, 0, len(expected))
+	scan.iter.After = SeqID(after)
+	scan.iter.Limit = limit
+	for {
+		row := scan.env.newRow()
+		if !scan.iter.Next(row) {
+			break
+		}
+		received = append(received, row)
+	}
+	if scan.iter.Err != nil {
+		return fmt.Sprintf("unexpected error: %s", scan.iter.Err), false
+	}
+
+	msg := fmt.Sprintf("\nexpected: %+v\nreceived: %+v", expected, received)
+	if len(received) != len(expected) {
+		return msg, false
+	}
+	for i, exp := range expected {
+		if !rowsEqual(exp, received[i]) {
+			return msg, false
+		}
+	}
+	return "", true
 }
 
 func TestSeqIDListing(t *testing.T) {
-	o := newSeqidTestO(t)
-	defer o.Close()
+	env := newIndexTestEnv(t)
+	defer env.tearDown()
 
 	// try empty listing
-	if items, err := seqidTestAll(o.M.T, "", 0); len(items) > 0 || err != nil {
-		if err != nil {
-			t.Fatal(err)
-		} else {
-			t.Fatal("should not have found any items")
-		}
+	if msg, ok := env.scanBySeqID().expect("", 0); !ok {
+		t.Fatal(msg)
 	}
 
-	p := o.M.T.NewP()
-	p.Name = "test1"
-	if err := o.M.T.CF().CommitCAS(p); err != nil {
-		t.Fatal(err)
-	}
-	if p.SeqID == "" {
-		t.Fatal("expected seqid to be filled in")
-	}
-
-	items, err := seqidTestAll(o.M.T, "", 0)
+	// Insert first item and see if the index returns it.
+	row1, err := env.makeRow("test1", 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 {
-		t.Fatal(fmt.Sprintf("expected exactly one item, found %d (%+v)", len(items), items))
-	}
-	if !rowsEqual(p, items[0]) {
-		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", p, items[0]))
+	if msg, ok := env.scanBySeqID().expect("", 0, row1); !ok {
+		t.Fatal(msg)
 	}
 
 	// Insert a second item two intervals ahead of the first.
-	oldi := interval(p.SeqID)
-	newi := incrInterval(incrInterval(oldi))
-	x, _ := strconv.ParseUint(string(intervalToSeqID(newi)), 36, 64)
-	o.tsg = testSeqIDGenerator(x)
-	q := o.M.T.NewP()
-	q.Name = "test2"
-	if err := o.M.T.CF().CommitCAS(q); err != nil {
-		t.Fatal(err)
-	}
-
-	items, err = seqidTestAll(o.M.T, "", 0)
+	env.setSeqIDInterval("2")
+	row2, err := env.makeRow("test2", 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 {
-		t.Fatal(fmt.Sprintf("expected exactly two items, found %d (%+v)", len(items), items))
-	}
-	if !rowsEqual(q, items[0]) {
-		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", q, items[0]))
-	}
-	if !rowsEqual(p, items[1]) {
-		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", p, items[1]))
+	if msg, ok := env.scanBySeqID().expect("", 0, row2, row1); !ok {
+		t.Fatal(msg)
 	}
 
-	items, err = seqidTestAll(o.M.T, "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 {
-		t.Fatal(fmt.Sprintf("expected exactly one item, found %d (%+v)", len(items), items))
-	}
-	if !rowsEqual(q, items[0]) {
-		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", q, items[0]))
+	// Test limit.
+	if msg, ok := env.scanBySeqID().expect("", 1, row2); !ok {
+		t.Fatal(msg)
 	}
 
-	x, _ = strconv.ParseUint(string(p.SeqID), 36, 64)
-	items, err = seqidTestAll(o.M.T, strconv.FormatUint(x+1, 36), 0)
-	if err != nil {
-		t.Fatal(err)
+	// Test after.
+	if msg, ok := env.scanBySeqID().expect("2", 0, row1); !ok {
+		t.Fatal(msg)
 	}
-	if len(items) != 1 {
-		t.Fatal(fmt.Sprintf("expected exactly one item, found %d (%+v)", len(items), items))
+}
+
+func TestCompoundSeqIDListing(t *testing.T) {
+	env := newIndexTestEnv(t)
+	defer env.tearDown()
+
+	// Try empty listings
+	if msg, ok := env.scanBy("Number").where(1001).expect("", 0); !ok {
+		t.Fatal(msg)
 	}
-	if !rowsEqual(p, items[0]) {
-		t.Fatal(fmt.Sprintf("\nexpected: %+v\nreceived: %+v", p, items[0]))
+	if msg, ok := env.scanBy("Number", "Status").where(1001, true).expect("", 0); !ok {
+		t.Fatal(msg)
+	}
+
+	// Make some test data
+	makeR := func(name string, number int64, status bool) Row {
+		row, err := env.makeRow(name, number, status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row
+	}
+	r1 := makeR("test1", 1001, true)
+	r2 := makeR("test2", 1002, false)
+	r3 := makeR("test3", 1001, false)
+	r4 := makeR("test4", 1002, true)
+	r5 := makeR("test5", 1001, true)
+
+	// Scan by each Number value.
+	if msg, ok := env.scanBy("Number").where(1001).expect("", 0, r5, r3, r1); !ok {
+		t.Fatal(msg)
+	}
+	if msg, ok := env.scanBy("Number", "Status").where(1001, true).expect("", 0, r5, r1); !ok {
+		t.Fatal(msg)
+	}
+	if msg, ok := env.scanBy("Number").where(1002).expect("", 0, r4, r2); !ok {
+		t.Fatal(msg)
+	}
+	if msg, ok := env.scanBy("Number", "Status").where(1002, false).expect("", 0, r2); !ok {
+		t.Fatal(msg)
+	}
+
+	// Make sure after and limit work.
+	if msg, ok := env.scanBy("Number").where(1001).expect("4", 1, r3); !ok {
+		t.Fatal(msg)
 	}
 }
