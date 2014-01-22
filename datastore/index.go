@@ -148,20 +148,6 @@ type Index struct {
 	Indexer   SeqIDIndexer
 }
 
-func AddIndex(options *CFOptions, indexer SeqIDIndexer) {
-	idx := &Index{IndexedCF: options.CF, Indexer: indexer}
-	options.Set(SEQID, idx)
-	options.Index(idx)
-}
-
-func AddIndexBySeqID(options *CFOptions) {
-	AddIndex(options, bySeqID(options.CF))
-}
-
-func AddIndexBy(options *CFOptions, columns ...string) {
-	AddIndex(options, byCols(options.CF, columns))
-}
-
 func (idx *Index) IndexName() string {
 	return idx.Indexer.IndexName()
 }

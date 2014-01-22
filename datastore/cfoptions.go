@@ -64,3 +64,18 @@ func (o *CFOptions) OnCreate(hook OnCreateHook) *CFOptions {
 	o.onCreateHooks = append(o.onCreateHooks, hook)
 	return o
 }
+
+func (options *CFOptions) AddIndex(indexer SeqIDIndexer) *CFOptions {
+	idx := &Index{IndexedCF: options.CF, Indexer: indexer}
+	options.Set(SEQID, idx)
+	options.Index(idx)
+	return options
+}
+
+func (options *CFOptions) AddIndexBySeqID() *CFOptions {
+	return options.AddIndex(bySeqID(options.CF))
+}
+
+func (options *CFOptions) AddIndexBy(columns ...string) *CFOptions {
+	return options.AddIndex(byCols(options.CF, columns))
+}

@@ -24,7 +24,7 @@ type seqidTestT ColumnFamily
 
 func (t *seqidTestT) ConfigureCF(options *CFOptions) {
 	options.Key("Name")
-	AddIndexBySeqID(options)
+	options.AddIndexBySeqID()
 }
 
 func (t *seqidTestT) CF() *ColumnFamily {
