@@ -16,11 +16,11 @@ func TestReflectSchemaFrom(t *testing.T) {
 		},
 	}
 	expected.Options = NewCFOptions(&expected)
-	bomtt := &BagOfManyTypesTable{}
+	bomtt := &bagOfManyTypesTable{}
 	bomtt.ConfigureCF(expected.Options)
 	expected.Options.typeID = 1
 
-	model := &TestModel{}
+	model := &testModel{}
 	schema := ReflectSchemaFrom(model)
 	if !reflect.DeepEqual(expected.Columns, schema.CFs["bags"].Columns) {
 		t.Errorf("\nexpected: %+v\nreceived: %+v", expected, *schema.CFs["bags"])
@@ -28,7 +28,7 @@ func TestReflectSchemaFrom(t *testing.T) {
 }
 
 func TestCreateStatement(t *testing.T) {
-	model := &TestModel{}
+	model := &testModel{}
 	ReflectSchemaFrom(model)
 
 	expected := "CREATE TABLE bags (D varchar, C bigint, A boolean, B double, E timestamp, F blob, PRIMARY KEY (D, C, A)) WITH comment='1'"

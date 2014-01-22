@@ -6,12 +6,12 @@ import "time"
 type TestOrm struct {
 	*Orm
 	*TestConn
-	M *TestModel
+	M *testModel
 }
 
 func NewTestOrm(t *testing.T) *TestOrm {
 	tc := NewTestConn(t)
-	model := &TestModel{}
+	model := &testModel{}
 	schema := ReflectSchemaFrom(model)
 	orm := &Orm{CassandraConn: tc.CassandraConn, Model: schema}
 	schema.Bind(orm)
@@ -39,7 +39,7 @@ func TestCreateAndLoadByKeyAndExists(t *testing.T) {
 		t.Fatal("Exists returned true on empty keyspace")
 	}
 
-	row := orm.M.Bags.NewRow().(*BagOfManyTypes)
+	row := orm.M.Bags.NewRow().(*bagOfManyTypes)
 	row.A = true
 	row.C = 1
 	row.D = "x"
@@ -55,7 +55,7 @@ func TestCreateAndLoadByKeyAndExists(t *testing.T) {
 		t.Fatal("Exists should have returned true")
 	}
 
-	row_out := orm.M.Bags.NewRow().(*BagOfManyTypes)
+	row_out := orm.M.Bags.NewRow().(*bagOfManyTypes)
 	if err := cf.LoadByKey(row_out, "x", 1, true); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestCreateAndLoadByKeyAndExists(t *testing.T) {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
 	}
 	// reconstruct to clear loadedColumns()
-	row = orm.M.Bags.NewRow().(*BagOfManyTypes)
+	row = orm.M.Bags.NewRow().(*bagOfManyTypes)
 	row.A = true
 	row.C = 1
 	row.D = "x"
@@ -82,7 +82,7 @@ func TestCommit(t *testing.T) {
 
 	now := time.Now()
 	cf := (*ColumnFamily)(orm.M.Bags)
-	row := orm.M.Bags.NewRow().(*BagOfManyTypes)
+	row := orm.M.Bags.NewRow().(*bagOfManyTypes)
 	row.A = true
 	row.C = 1
 	row.D = "x"
@@ -95,7 +95,7 @@ func TestCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := orm.M.Bags.NewRow().(*BagOfManyTypes)
+	out := orm.M.Bags.NewRow().(*bagOfManyTypes)
 	if err := cf.LoadByKey(out, "x", 1, true); err != nil {
 		t.Fatal(err)
 	}

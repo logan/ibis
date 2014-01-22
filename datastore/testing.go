@@ -13,7 +13,7 @@ var (
 	flagKeyspace = flag.String("keyspace", "creative_test", "name of throwaway keyspace for testing")
 )
 
-type BagOfManyTypes struct {
+type bagOfManyTypes struct {
 	ReflectedRow
 	A bool
 	B float64
@@ -23,20 +23,20 @@ type BagOfManyTypes struct {
 	F []byte
 }
 
-type BagOfManyTypesTable ColumnFamily
+type bagOfManyTypesTable ColumnFamily
 
-func (t *BagOfManyTypesTable) NewRow() Row {
-	row := &BagOfManyTypes{}
+func (t *bagOfManyTypesTable) NewRow() Row {
+	row := &bagOfManyTypes{}
 	row.CF = (*ColumnFamily)(t)
 	return row.Reflect(row)
 }
 
-func (t *BagOfManyTypesTable) ConfigureCF(options *CFOptions) {
+func (t *bagOfManyTypesTable) ConfigureCF(options *CFOptions) {
 	options.Key("D", "C", "A")
 }
 
-type TestModel struct {
-	Bags *BagOfManyTypesTable
+type testModel struct {
+	Bags *bagOfManyTypesTable
 }
 
 // A TestConn extends CassandraConn to manage throwaway keyspaces. This guarantees tests a pristine
