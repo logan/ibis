@@ -20,11 +20,9 @@ func NewSchema() *Schema {
 // AddCF adds a column family definition to the schema.
 func (s *Schema) AddCF(cf *ColumnFamily) {
 	s.CFs[strings.ToLower(cf.Name)] = cf
-	for _, val := range cf.Options.ctx {
-		if idx, ok := val.(CFIndex); ok {
-			for _, subcf := range idx.CFs() {
-				s.AddCF(subcf)
-			}
+	for _, idx := range cf.Options.Indexes {
+		for _, subcf := range idx.IndexCFs() {
+			s.AddCF(subcf)
 		}
 	}
 	if cf.Options.typeID == 0 {

@@ -2,7 +2,6 @@ package datastore
 
 import "errors"
 import "fmt"
-import "reflect"
 import "strings"
 
 import "tux21b.org/v1/gocql"
@@ -11,85 +10,195 @@ var (
 	ErrNoSeqIDListing = errors.New("table has no seqid listing")
 )
 
+type seqIDIndexKey int
+
+const SEQID seqIDIndexKey = iota
+
 type SeqIDRow struct {
 	ReflectedRow
 	SeqID SeqID
 }
 
-type seqIDIndexKey int
+type CFIndexer interface {
+	// IndexName returns a unique name (per indexed column family) for this index.
+	IndexName() string
 
-const SEQID seqIDIndexKey = iota
+	// IndexCFs returns any auxiliary column families that the indexer intends to use for storage.
+	IndexCFs() []*ColumnFamily
 
-type seqIDIndexer ColumnFamily
-
-func AddSeqIDIndex(options *CFOptions) {
-	indexer := SeqIDListingColumnFamily(options.CF)
-	options.Set(SEQID, indexer)
-	options.Index(indexer)
+	// Index inspects a row's marshalled data returns CQL statements to execute just prior to
+	// writing the row itself.
+	Index(*ColumnFamily, *MarshalledMap) ([]*CQL, error)
 }
 
-func (idx *seqIDIndexer) CFs() []*ColumnFamily {
-	return []*ColumnFamily{(*ColumnFamily)(idx)}
+type SeqIDIndexEntry struct {
+	CF             *ColumnFamily
+	SeqID          SeqID
+	PartitionParts []string
+	Key            MarshalledMap
 }
 
-func (idx *seqIDIndexer) Index(cf *ColumnFamily, mmap *MarshalledMap) ([]CFIndexStatement, error) {
-	var seqid SeqID
-	var err error
-	seqid_rv, ok := (*mmap)["SeqID"]
-	if !ok || len(seqid_rv.Bytes) == 0 {
-		seqid, err = cf.orm.SeqID.New()
-		if err != nil {
-			return nil, err
+func (entry *SeqIDIndexEntry) partition() string {
+	if len(entry.PartitionParts) == 0 {
+		return interval(entry.SeqID)
+	}
+	// TODO: escape each part so it doesn't matter if they contain '~'
+	return strings.Join(entry.PartitionParts, "~") + "~" + interval(entry.SeqID)
+}
+
+func (entry *SeqIDIndexEntry) GetCF() *ColumnFamily {
+	return entry.CF
+}
+
+func (entry *SeqIDIndexEntry) Marshal(mmap *MarshalledMap) (err error) {
+	(*mmap)["Interval"] = &MarshalledValue{TypeInfo: tiVarchar, Dirty: true}
+	if (*mmap)["Interval"].Bytes, err = gocql.Marshal(tiVarchar, entry.partition()); err != nil {
+		return
+	}
+	(*mmap)["SeqID"] = &MarshalledValue{TypeInfo: tiVarchar, Dirty: true}
+	if (*mmap)["SeqID"].Bytes, err = gocql.Marshal(tiVarchar, string(entry.SeqID)); err != nil {
+		return
+	}
+	for k, v := range entry.Key {
+		(*mmap)[k] = v
+	}
+	return
+}
+
+func (entry *SeqIDIndexEntry) Unmarshal(mmap *MarshalledMap) error {
+	if inter, ok := (*mmap)["Interval"]; ok && inter != nil {
+		var s string
+		if err := gocql.Unmarshal(tiVarchar, inter.Bytes, &s); err != nil {
+			return err
 		}
-		b, err := gocql.Marshal(tiVarchar, string(seqid))
-		if err != nil {
-			return nil, err
+		parts := strings.Split(s, "~")
+		if len(parts) > 0 {
+			entry.PartitionParts = parts[:len(parts)-1]
 		}
-		(*mmap)["SeqID"] = &MarshalledValue{Bytes: b, TypeInfo: tiVarchar}
-	} else {
-		gocql.Unmarshal(tiVarchar, seqid_rv.Bytes, &seqid)
 	}
-
-	var pkPart string
-	if cf.Options.PrimaryKey[0] != "SeqID" {
-		pkPart = fmt.Sprintf(", %s", strings.Join(cf.Options.PrimaryKey, ", "))
+	if seqid, ok := (*mmap)["SeqID"]; ok && seqid != nil {
+		if err := gocql.Unmarshal(tiVarchar, seqid.Bytes, &entry.SeqID); err != nil {
+			return err
+		}
 	}
-	stmt := fmt.Sprintf("INSERT INTO %s (Interval, SeqID%s) VALUES (%s)",
-		idx.Name, pkPart, placeholderList(len(idx.Columns)))
-
-	var values []interface{}
-	if cf.Options.PrimaryKey[0] == "SeqID" {
-		values = make([]interface{}, 0)
-	} else {
-		values = mmap.InterfacesFor(cf.Options.PrimaryKey...)
+	entry.Key = make(MarshalledMap)
+	for k, v := range *mmap {
+		if k != "Interval" && k != "SeqID" {
+			entry.Key[k] = v
+		}
 	}
-	params := make([]interface{}, len(values)+2)
-	params[0] = interval(seqid)
-	params[1] = seqid
-	copy(params[2:], values)
-	return []CFIndexStatement{CFIndexStatement{stmt, params}}, nil
+	return nil
 }
 
-func SeqIDListingColumnFamily(cf *ColumnFamily) *seqIDIndexer {
-	idxCf := &ColumnFamily{
-		Name: fmt.Sprintf("%sBySeqID", cf.Name),
-		Columns: []Column{
-			Column{
-				Name: "Interval", Type: "varchar",
-				typeInfo: tiVarchar,
-			},
-			Column{
-				Name: "SeqID", Type: "varchar",
-				typeInfo: tiVarchar,
-			},
-		},
+type SeqIDIndexer interface {
+	SeqIDIndex(*MarshalledMap, *SeqIDIndexEntry) error
+	IndexName() string
+}
+
+type byColsIndexer struct {
+	cf      *ColumnFamily
+	columns []string
+}
+
+func bySeqID(cf *ColumnFamily) SeqIDIndexer {
+	return &byColsIndexer{cf: cf}
+}
+
+func byCols(cf *ColumnFamily, columns []string) SeqIDIndexer {
+	return &byColsIndexer{cf: cf, columns: columns}
+}
+
+func (bc *byColsIndexer) IndexName() string {
+	if len(bc.columns) == 0 {
+		return "BySeqID"
 	}
-	if cf.Options.PrimaryKey[0] != "SeqID" {
-		idxCf.Columns = append(idxCf.Columns, cf.Columns[:len(cf.Options.PrimaryKey)]...)
+	return "By" + strings.Join(bc.columns, "")
+}
+
+func (bc *byColsIndexer) SeqIDIndex(mmap *MarshalledMap, entry *SeqIDIndexEntry) error {
+	var seqid *MarshalledValue
+	var ok bool
+	if seqid, ok = (*mmap)["SeqID"]; !ok || seqid == nil || len(seqid.Bytes) == 0 {
+		s, err := bc.cf.orm.SeqID.New()
+		if err != nil {
+			return err
+		}
+		b, err := gocql.Marshal(tiVarchar, string(s))
+		if err != nil {
+			return err
+		}
+		seqid = &MarshalledValue{Bytes: b, TypeInfo: tiVarchar, Dirty: true}
+		(*mmap)["SeqID"] = seqid
 	}
-	idxCf.Options = NewCFOptions(idxCf).Key("Interval", "SeqID")
-	idxCf.Options.OnCreate(insertSeqIDListingSentinel)
-	return (*seqIDIndexer)(idxCf)
+	if err := gocql.Unmarshal(tiVarchar, seqid.Bytes, &entry.SeqID); err != nil {
+		return err
+	}
+	entry.Key = make(MarshalledMap)
+	for _, k := range bc.cf.Options.PrimaryKey {
+		if k != "SeqID" {
+			entry.Key[k] = (*mmap)[k]
+		}
+	}
+	return nil
+}
+
+type Index struct {
+	CF        *ColumnFamily
+	IndexedCF *ColumnFamily
+	Indexer   SeqIDIndexer
+}
+
+func AddIndex(options *CFOptions, indexer SeqIDIndexer) {
+	idx := &Index{IndexedCF: options.CF, Indexer: indexer}
+	options.Set(SEQID, idx)
+	options.Index(idx)
+}
+
+func AddIndexBySeqID(options *CFOptions) {
+	AddIndex(options, bySeqID(options.CF))
+}
+
+func AddIndexBy(options *CFOptions, columns ...string) {
+	AddIndex(options, byCols(options.CF, columns))
+}
+
+func (idx *Index) IndexName() string {
+	return idx.Indexer.IndexName()
+}
+
+func (idx *Index) IndexCFs() []*ColumnFamily {
+	if idx.CF == nil {
+		idx.CF = &ColumnFamily{
+			Name: idx.IndexedCF.Name + idx.IndexName(),
+			Columns: []Column{
+				Column{
+					Name: "Interval", Type: "varchar",
+					typeInfo: tiVarchar,
+				},
+				Column{
+					Name: "SeqID", Type: "varchar",
+					typeInfo: tiVarchar,
+				},
+			},
+		}
+		for i, k := range idx.IndexedCF.Options.PrimaryKey {
+			if k != "SeqID" {
+				idx.CF.Columns = append(idx.CF.Columns, idx.IndexedCF.Columns[i])
+			}
+		}
+		idx.CF.Options = NewCFOptions(idx.CF).Key("Interval", "SeqID")
+		idx.CF.Options.OnCreate(insertSeqIDListingSentinel)
+	}
+	return []*ColumnFamily{idx.CF}
+}
+
+func (idx *Index) Index(cf *ColumnFamily, mmap *MarshalledMap) ([]*CQL, error) {
+	// TODO: handle index deletions when mutable columns are indexed
+	entry := &SeqIDIndexEntry{CF: idx.CF}
+	if err := idx.Indexer.SeqIDIndex(mmap, entry); err != nil {
+		return nil, err
+	}
+	return idx.CF.PrepareCommit(entry)
 }
 
 func insertSeqIDListingSentinel(orm *Orm, table *ColumnFamily) error {
@@ -109,8 +218,8 @@ type SeqIDListingIter struct {
 	idxcf         *ColumnFamily
 	keysRetrieved int
 	interval      string
-	rowchan       chan Row
-	keychan       chan []interface{}
+	rowchan       chan MarshalledMap
+	keychan       chan SeqIDIndexEntry
 	exhausted     bool
 }
 
@@ -120,8 +229,8 @@ func IterSeqIDListing(table ReflectableColumnFamily) *SeqIDListingIter {
 	if !cf.IsBound() {
 		return &SeqIDListingIter{Err: ErrTableNotBound}
 	}
-	if idx, ok := cf.Options.Get(SEQID).(*seqIDIndexer); ok {
-		return &SeqIDListingIter{rcf: table, rowcf: cf, idxcf: (*ColumnFamily)(idx)}
+	if idx, ok := cf.Options.Get(SEQID).(*Index); ok {
+		return &SeqIDListingIter{rcf: table, rowcf: cf, idxcf: (*ColumnFamily)(idx.CF)}
 	}
 	return &SeqIDListingIter{Err: ErrNoSeqIDListing}
 }
@@ -129,7 +238,7 @@ func IterSeqIDListing(table ReflectableColumnFamily) *SeqIDListingIter {
 // Next reads the next item from an iteration over a SeqIDListing. The item is read into the given
 // row object. If this function returns false, compare iter.Err to nil to determine whether an error
 // occurred or the iteration over the listing was merely exhausted.
-func (iter *SeqIDListingIter) Next(row Row) (ok bool) {
+func (iter *SeqIDListingIter) Next(row Row) bool {
 	if iter.Err != nil {
 		return false
 	}
@@ -138,70 +247,53 @@ func (iter *SeqIDListingIter) Next(row Row) (ok bool) {
 		return false
 	}
 	if iter.rowchan == nil {
-		iter.scanChunk(row)
+		iter.scanChunk()
 	}
-	r, ok := <-iter.rowchan
-	if ok {
-		reflect.ValueOf(row).Elem().Set(reflect.ValueOf(r).Elem())
+	if mmap, ok := <-iter.rowchan; ok {
+		iter.Err = row.Unmarshal(&mmap)
+		return iter.Err == nil
 	}
-	return
+	return false
 }
 
-func (iter *SeqIDListingIter) scanChunk(row Row) {
+func (iter *SeqIDListingIter) scanChunk() {
 	if iter.ChunkSize == 0 {
 		iter.ChunkSize = 10000
 	}
 
-	iter.rowchan = make(chan Row, iter.ChunkSize)
+	iter.rowchan = make(chan MarshalledMap, iter.ChunkSize)
 
 	go func() {
 		// TODO: do batch lookups
 		defer close(iter.rowchan)
 
-		row_type := reflect.TypeOf(row)
-		buf := reflect.MakeSlice(reflect.SliceOf(row_type), iter.ChunkSize, iter.ChunkSize)
-		for i := 0; i < iter.ChunkSize; i++ {
-			buf.Index(i).Set(reflect.New(row_type.Elem()))
-		}
-		buf_i := 0
-
-		for !iter.exhausted {
+		for !iter.exhausted && iter.Err == nil {
 			if iter.keychan == nil {
-				iter.scanInterval(row)
+				iter.scanInterval()
 				if iter.Err != nil {
 					return
 				}
 			}
-			for pki := range iter.keychan {
-				row := iter.rcf.NewRow()
-				if iter.Err = iter.rowcf.LoadByKey(row, pki...); iter.Err != nil {
+			for entry := range iter.keychan {
+				cql := NewSelect(iter.rowcf)
+				for k, v := range entry.Key {
+					cql.Where(k+" = ?", v)
+				}
+				mmap := make(MarshalledMap)
+				if iter.Err = cql.Query().Scan(&mmap); iter.Err != nil {
 					return
 				}
-				buf.Index(buf_i).Elem().Set(reflect.ValueOf(row).Convert(row_type).Elem())
-				iter.rowchan <- row
-				buf_i = (buf_i + 1) % buf.Len()
+				iter.rowchan <- mmap
 			}
 		}
 	}()
 }
 
-func (iter *SeqIDListingIter) scanInterval(row Row) {
-	iter.keychan = make(chan []interface{}, iter.ChunkSize)
+func (iter *SeqIDListingIter) scanInterval() {
+	iter.keychan = make(chan SeqIDIndexEntry, iter.ChunkSize)
 
 	go func() {
-		var interval string
-		var seqid SeqID
-
 		defer close(iter.keychan)
-
-		pkLen := len(iter.rowcf.Options.PrimaryKey)
-		pkIsSeqID := iter.rowcf.Options.PrimaryKey[0] == "SeqID"
-		if pkIsSeqID {
-			pkLen = 0
-		}
-		buf := make([][]interface{}, iter.ChunkSize)
-		rvs := make([][]MarshalledValue, iter.ChunkSize)
-		buf_i := 0
 
 		for {
 			var limit int
@@ -219,31 +311,22 @@ func (iter *SeqIDListingIter) scanInterval(row Row) {
 
 			ci := iter.queryCurrentInterval(limit)
 			for {
-				buf[buf_i] = make([]interface{}, 2+pkLen)
-				buf[buf_i][0] = &interval
-				buf[buf_i][1] = &seqid
-				rvs[buf_i] = make([]MarshalledValue, pkLen)
-				if !pkIsSeqID {
-					for i, _ := range iter.rowcf.Options.PrimaryKey {
-						buf[buf_i][i+2] = &rvs[buf_i][i]
-					}
-				}
-				if !ci.Scan(buf[buf_i]...) {
+				entry := SeqIDIndexEntry{CF: iter.rowcf}
+				mmap := make(MarshalledMap)
+				entry.Marshal(&mmap)
+				if !ci.Next(&mmap) {
 					break
 				}
-				if seqid == "" {
+				if iter.Err = entry.Unmarshal(&mmap); iter.Err != nil {
+					return
+				}
+				if entry.SeqID == "" {
 					// encountered sentinel, scan is complete
 					iter.exhausted = true
 					return
 				}
-				iter.After = seqid
 				iter.keysRetrieved++
-				if pkIsSeqID {
-					iter.keychan <- []interface{}{seqid}
-				} else {
-					iter.keychan <- buf[buf_i][2:]
-				}
-				buf_i = (buf_i + 1) % len(buf)
+				iter.keychan <- entry
 			}
 			if iter.Err = ci.Close(); iter.Err != nil {
 				// abort with error
@@ -258,7 +341,7 @@ func (iter *SeqIDListingIter) scanInterval(row Row) {
 	return
 }
 
-func (iter *SeqIDListingIter) queryCurrentInterval(limit int) *gocql.Iter {
+func (iter *SeqIDListingIter) queryCurrentInterval(limit int) *CQLIter {
 	if iter.interval == "" {
 		if iter.After == "" {
 			iter.interval = iter.rowcf.orm.SeqID.CurrentInterval()
@@ -267,9 +350,10 @@ func (iter *SeqIDListingIter) queryCurrentInterval(limit int) *gocql.Iter {
 			iter.interval = interval(iter.After)
 		}
 	}
-	stmt := fmt.Sprintf("SELECT * FROM %s WHERE Interval = ? AND SeqID < ?"+
-		" ORDER BY SeqID DESC LIMIT %d", iter.idxcf.Name, limit)
-	q := iter.idxcf.orm.Query(stmt, iter.interval, iter.After)
-	i := q.Iter()
-	return i
+
+	// TODO: support compound partitions
+	cql := NewSelect(iter.idxcf)
+	cql.Where("Interval = ?", iter.interval).Where("SeqID < ?", iter.After)
+	cql.OrderBy("SeqID DESC").Limit(limit)
+	return cql.Query().Iter()
 }

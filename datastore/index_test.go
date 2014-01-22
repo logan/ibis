@@ -24,7 +24,7 @@ type seqidTestT ColumnFamily
 
 func (t *seqidTestT) ConfigureCF(options *CFOptions) {
 	options.Key("Name")
-	AddSeqIDIndex(options)
+	AddIndexBySeqID(options)
 }
 
 func (t *seqidTestT) CF() *ColumnFamily {
@@ -111,7 +111,7 @@ func TestSeqIDListing(t *testing.T) {
 	}
 
 	p := o.M.T.NewP()
-	p.Name = "1"
+	p.Name = "test1"
 	if err := o.M.T.CF().CommitCAS(p); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestSeqIDListing(t *testing.T) {
 	x, _ := strconv.ParseUint(string(intervalToSeqID(newi)), 36, 64)
 	o.tsg = testSeqIDGenerator(x)
 	q := o.M.T.NewP()
-	q.Name = "2"
+	q.Name = "test2"
 	if err := o.M.T.CF().CommitCAS(q); err != nil {
 		t.Fatal(err)
 	}

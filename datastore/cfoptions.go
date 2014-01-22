@@ -2,22 +2,11 @@ package datastore
 
 type OnCreateHook func(*Orm, *ColumnFamily) error
 
-type CFIndexStatement struct {
-	Query  string
-	Params []interface{}
-}
-
-type CFIndex interface {
-	// TODO: remove cf arg?
-	Index(*ColumnFamily, *MarshalledMap) ([]CFIndexStatement, error)
-	CFs() []*ColumnFamily
-}
-
 // CFOptions is used to provide additional properties for a column family definition.
 type CFOptions struct {
 	CF            *ColumnFamily
 	PrimaryKey    []string
-	Indexes       []CFIndex
+	Indexes       []CFIndexer
 	onCreateHooks []OnCreateHook // If given, will be called immediately after table creation.
 	typeID        int
 	ctx           map[interface{}]interface{}
@@ -25,7 +14,7 @@ type CFOptions struct {
 
 func NewCFOptions(cf *ColumnFamily) *CFOptions {
 	o := &CFOptions{CF: cf}
-	o.Indexes = make([]CFIndex, 0)
+	o.Indexes = make([]CFIndexer, 0)
 	o.ctx = make(map[interface{}]interface{})
 	o.onCreateHooks = make([]OnCreateHook, 0)
 	return o
@@ -66,7 +55,7 @@ func (o *CFOptions) Key(keys ...string) *CFOptions {
 	return o
 }
 
-func (o *CFOptions) Index(index CFIndex) *CFOptions {
+func (o *CFOptions) Index(index CFIndexer) *CFOptions {
 	o.Indexes = append(o.Indexes, index)
 	return o
 }

@@ -65,28 +65,27 @@ func placeholderList(n int) string {
 	return placeholderListString[:3*(n-1)+1]
 }
 
-// Commit writes any modified values in the given row to the given CF.
-func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
-	pkdef := cf.Options.PrimaryKey
+func (orm *Orm) PrepareCommit(cf *ColumnFamily, row Row, cas bool) ([]*CQL, error) {
 	mmap := make(MarshalledMap)
 	if err := row.Marshal(&mmap); err != nil {
-		return err
+		return nil, err
 	}
+	return orm.precommit(cf, &mmap, cas)
+}
+
+func (orm *Orm) precommit(cf *ColumnFamily, mmap *MarshalledMap, cas bool) ([]*CQL, error) {
+	stmts := make([]*CQL, 0, 1)
 
 	// First allow indexes to update both Cassandra and the Row.
-	b := gocql.NewBatch(gocql.LoggedBatch)
 	for _, idx := range cf.Options.Indexes {
-		idx_stmts, err := idx.Index(cf, &mmap)
+		idx_stmts, err := idx.Index(cf, mmap)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		for _, idx_stmt := range idx_stmts {
-			b.Query(idx_stmt.Query, idx_stmt.Params...)
-		}
-	}
-	if len(b.Entries) > 0 {
-		if err := orm.Session.ExecuteBatch(b); err != nil {
-			return err
+		for _, stmt := range idx_stmts {
+			if stmt != nil {
+				stmts = append(stmts, stmt)
+			}
 		}
 	}
 
@@ -95,33 +94,70 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 	for i, col := range cf.Columns {
 		selectedKeys[i] = col.Name
 	}
-	var stmt string
-	var params []interface{}
+	var cql *CQL
 	if cas {
-		stmt = buildInsertStatement(cf, selectedKeys)
-		params = mmap.InterfacesFor(selectedKeys...)
+		cql = NewInsert(cf).Keys(selectedKeys...).Values(mmap.InterfacesFor(selectedKeys...)...)
+		cql.IfNotExists()
 	} else {
 		// For an update, it makes no sense to treat primary keys as dirty.
-		for _, k := range pkdef {
-			mmap[k].Dirty = false
+		for _, k := range cf.Options.PrimaryKey {
+			(*mmap)[k].Dirty = false
 		}
 		selectedKeys = mmap.DirtyKeys()
-		stmt = buildUpdateStatement(cf, selectedKeys)
-		params = mmap.InterfacesFor(selectedKeys...)
-		for _, v := range mmap.InterfacesFor(pkdef...) {
-			params = append(params, v)
+		if len(selectedKeys) > 0 {
+			cql = NewUpdate(cf)
+			for _, k := range selectedKeys {
+				cql.Set(k, (*mmap)[k])
+			}
+			for _, k := range cf.Options.PrimaryKey {
+				cql.Where(k+" = ?", (*mmap)[k])
+			}
+		}
+	}
+	return append(stmts, cql), nil
+}
+
+// Commit writes any modified values in the given row to the given CF.
+func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
+	mmap := make(MarshalledMap)
+	if err := row.Marshal(&mmap); err != nil {
+		return err
+	}
+
+	stmts, err := orm.precommit(cf, &mmap, cas)
+	if err != nil {
+		return err
+	}
+
+	// Apply all but the final statement as a batch (as these should be index updates).
+	if len(stmts) > 1 {
+		batch := gocql.NewBatch(gocql.LoggedBatch)
+		for _, cql := range stmts[:len(stmts)-1] {
+			compiled := cql.compile()
+			batch.Query(compiled.term, compiled.params...)
+		}
+		if err = orm.Session.ExecuteBatch(batch); err != nil {
+			return err
 		}
 	}
 
-	// Apply the computed CQL and check results.
-	q := orm.Query(stmt, params...)
-
+	// Apply the INSERT or UPDATE and check results.
+	cql := stmts[len(stmts)-1]
+	if cql == nil {
+		return nil
+	}
+	compiled := cql.compile()
+	q := orm.Query(compiled.term, compiled.params...)
 	if cas {
 		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
 		// indicating success, and a row with the values that were committed. We don't need this
 		// response, but we need to supply MarshalledValue pointers for the returned columns anyway.
 		// Despite this, the values pointed to will not be filled in except in the case of error.
 		casmap := make(MarshalledMap)
+		selectedKeys := make([]string, len(cf.Columns))
+		for i, col := range cf.Columns {
+			selectedKeys[i] = col.Name
+		}
 		pointers := casmap.PointersTo(selectedKeys...)
 		if applied, err := q.ScanCAS(pointers...); !applied || err != nil {
 			if err == nil {
@@ -134,29 +170,9 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 			return err
 		}
 	}
+
 	// Make the row unmarshal its given values, in case it is caching upon load.
 	return row.Unmarshal(&mmap)
-}
-
-func buildInsertStatement(cf *ColumnFamily, colnames []string) string {
-	colname_list := strings.Join(colnames, ", ")
-	placeholders := placeholderList(len(colnames))
-	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) IF NOT EXISTS",
-		cf.Name, colname_list, placeholders)
-}
-
-func buildUpdateStatement(cf *ColumnFamily, colnames []string) string {
-	set_terms := make([]string, len(colnames))
-	for i, colname := range colnames {
-		set_terms[i] = fmt.Sprintf("%s = ?", colname)
-	}
-	pkdef := cf.Options.PrimaryKey
-	where_terms := make([]string, len(pkdef))
-	for i, k := range pkdef {
-		where_terms[i] = fmt.Sprintf("%s = ?", k)
-	}
-	return fmt.Sprintf("UPDATE %s SET %s WHERE %s",
-		cf.Name, strings.Join(set_terms, ", "), strings.Join(where_terms, " AND "))
 }
 
 // LoadByKey loads data from a row's column family into that row. The row is selected by the given

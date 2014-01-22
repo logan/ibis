@@ -89,8 +89,8 @@ func goTypeToCassType(t reflect.Type) (string, bool) {
 func (t *ColumnFamily) Bind(orm *Orm) {
 	t.orm = orm
 	for _, val := range t.Options.ctx {
-		if idx, ok := val.(CFIndex); ok {
-			for _, subcf := range idx.CFs() {
+		if idx, ok := val.(CFIndexer); ok {
+			for _, subcf := range idx.IndexCFs() {
 				subcf.Bind(orm)
 			}
 		}
@@ -150,4 +150,14 @@ func (t *ColumnFamily) Commit(row Row) error {
 		return ErrInvalidType
 	}
 	return t.orm.Commit(t, row, false)
+}
+
+func (t *ColumnFamily) PrepareCommit(row Row) ([]*CQL, error) {
+	if !t.IsBound() {
+		return nil, ErrTableNotBound
+	}
+	if !t.IsValidRowType(row) {
+		return nil, ErrInvalidType
+	}
+	return t.orm.PrepareCommit(t, row, false)
 }
