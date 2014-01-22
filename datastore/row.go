@@ -66,15 +66,6 @@ func (rv *MarshalledValue) UnmarshalCQL(info *gocql.TypeInfo, bytes []byte) erro
 
 type MarshalledMap map[string]*MarshalledValue
 
-func (rv *MarshalledMap) subtractUnchanged(orig *MarshalledMap) {
-	for k, v := range *orig {
-		nv, ok := (*rv)[k]
-		if ok && bytes.Equal(v.Bytes, nv.Bytes) {
-			delete(*rv, k)
-		}
-	}
-}
-
 func (rv *MarshalledMap) InterfacesFor(keys ...string) []interface{} {
 	result := make([]interface{}, len(keys))
 	for i, k := range keys {
@@ -105,16 +96,16 @@ func (rv *MarshalledMap) DirtyKeys() []string {
 // A Row is capable of pointing to its column family and marshalling/unmarshalling itself.
 type Row interface {
 	GetCF() *ColumnFamily
-	Marshal(*MarshalledMap) error
-	Unmarshal(*MarshalledMap) error
+	Marshal(MarshalledMap) error
+	Unmarshal(MarshalledMap) error
 }
 
 type ReflectedRow struct {
 	CF     *ColumnFamily `json:"-"`
 	self   Row
-	loaded *MarshalledMap
-	total  *MarshalledMap
-	dirty  *MarshalledMap
+	loaded MarshalledMap
+	total  MarshalledMap
+	dirty  MarshalledMap
 }
 
 func (s *ReflectedRow) Reflect(self Row) Row {
@@ -126,14 +117,14 @@ func (s *ReflectedRow) GetCF() *ColumnFamily {
 	return s.CF
 }
 
-func (s *ReflectedRow) loadedMap() *MarshalledMap {
+func (s *ReflectedRow) loadedMap() MarshalledMap {
 	if s.loaded == nil {
-		s.loaded = new(MarshalledMap)
+		s.loaded = make(MarshalledMap)
 	}
 	return s.loaded
 }
 
-func (s *ReflectedRow) Marshal(mmap *MarshalledMap) error {
+func (s *ReflectedRow) Marshal(mmap MarshalledMap) error {
 	cf := s.GetCF()
 	loaded := s.loadedMap()
 	value := reflect.Indirect(reflect.ValueOf(s.self))
@@ -152,20 +143,19 @@ func (s *ReflectedRow) Marshal(mmap *MarshalledMap) error {
 			if err != nil {
 				return err
 			}
-			(*mmap)[col.Name] = &MarshalledValue{Bytes: marshalled, TypeInfo: col.typeInfo}
-			if prev, ok := (*loaded)[col.Name]; !ok || !bytes.Equal(prev.Bytes, marshalled) {
-				(*mmap)[col.Name].Dirty = true
+			mmap[col.Name] = &MarshalledValue{Bytes: marshalled, TypeInfo: col.typeInfo}
+			if prev, ok := loaded[col.Name]; !ok || !bytes.Equal(prev.Bytes, marshalled) {
+				mmap[col.Name].Dirty = true
 			}
 		}
 	}
 	return nil
 }
 
-func (s *ReflectedRow) Unmarshal(mmap *MarshalledMap) error {
-	s.loaded = new(MarshalledMap)
-	(*s.loaded) = make(MarshalledMap)
+func (s *ReflectedRow) Unmarshal(mmap MarshalledMap) error {
+	s.loaded = make(MarshalledMap)
 	value := reflect.Indirect(reflect.ValueOf(s.self))
-	for k, v := range *mmap {
+	for k, v := range mmap {
 		if v.Bytes != nil {
 			target := value.FieldByName(k)
 			if !target.IsValid() {
@@ -185,7 +175,7 @@ func (s *ReflectedRow) Unmarshal(mmap *MarshalledMap) error {
 					*t = time.Time{}
 				}
 			}
-			(*s.loaded)[k] = v
+			s.loaded[k] = v
 		}
 	}
 	return nil

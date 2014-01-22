@@ -28,7 +28,7 @@ type CFIndexer interface {
 
 	// Index inspects a row's marshalled data returns CQL statements to execute just prior to
 	// writing the row itself.
-	Index(*ColumnFamily, *MarshalledMap) ([]*CQL, error)
+	Index(*ColumnFamily, MarshalledMap) ([]*CQL, error)
 }
 
 type SeqIDIndexEntry struct {
@@ -50,23 +50,23 @@ func (entry *SeqIDIndexEntry) GetCF() *ColumnFamily {
 	return entry.CF
 }
 
-func (entry *SeqIDIndexEntry) Marshal(mmap *MarshalledMap) (err error) {
-	(*mmap)["Interval"] = &MarshalledValue{TypeInfo: tiVarchar, Dirty: true}
-	if (*mmap)["Interval"].Bytes, err = gocql.Marshal(tiVarchar, entry.partition()); err != nil {
+func (entry *SeqIDIndexEntry) Marshal(mmap MarshalledMap) (err error) {
+	mmap["Interval"] = &MarshalledValue{TypeInfo: tiVarchar, Dirty: true}
+	if mmap["Interval"].Bytes, err = gocql.Marshal(tiVarchar, entry.partition()); err != nil {
 		return
 	}
-	(*mmap)["SeqID"] = &MarshalledValue{TypeInfo: tiVarchar, Dirty: true}
-	if (*mmap)["SeqID"].Bytes, err = gocql.Marshal(tiVarchar, string(entry.SeqID)); err != nil {
+	mmap["SeqID"] = &MarshalledValue{TypeInfo: tiVarchar, Dirty: true}
+	if mmap["SeqID"].Bytes, err = gocql.Marshal(tiVarchar, string(entry.SeqID)); err != nil {
 		return
 	}
 	for k, v := range entry.Key {
-		(*mmap)[k] = v
+		mmap[k] = v
 	}
 	return
 }
 
-func (entry *SeqIDIndexEntry) Unmarshal(mmap *MarshalledMap) error {
-	if inter, ok := (*mmap)["Interval"]; ok && inter != nil {
+func (entry *SeqIDIndexEntry) Unmarshal(mmap MarshalledMap) error {
+	if inter, ok := mmap["Interval"]; ok && inter != nil {
 		var s string
 		if err := gocql.Unmarshal(tiVarchar, inter.Bytes, &s); err != nil {
 			return err
@@ -76,13 +76,13 @@ func (entry *SeqIDIndexEntry) Unmarshal(mmap *MarshalledMap) error {
 			entry.PartitionParts = parts[:len(parts)-1]
 		}
 	}
-	if seqid, ok := (*mmap)["SeqID"]; ok && seqid != nil {
+	if seqid, ok := mmap["SeqID"]; ok && seqid != nil {
 		if err := gocql.Unmarshal(tiVarchar, seqid.Bytes, &entry.SeqID); err != nil {
 			return err
 		}
 	}
 	entry.Key = make(MarshalledMap)
-	for k, v := range *mmap {
+	for k, v := range mmap {
 		if k != "Interval" && k != "SeqID" {
 			entry.Key[k] = v
 		}
@@ -91,7 +91,7 @@ func (entry *SeqIDIndexEntry) Unmarshal(mmap *MarshalledMap) error {
 }
 
 type SeqIDIndexer interface {
-	SeqIDIndex(*MarshalledMap, *SeqIDIndexEntry) error
+	SeqIDIndex(MarshalledMap, *SeqIDIndexEntry) error
 	IndexName() string
 }
 
@@ -115,10 +115,10 @@ func (bc *byColsIndexer) IndexName() string {
 	return "By" + strings.Join(bc.columns, "")
 }
 
-func (bc *byColsIndexer) SeqIDIndex(mmap *MarshalledMap, entry *SeqIDIndexEntry) error {
+func (bc *byColsIndexer) SeqIDIndex(mmap MarshalledMap, entry *SeqIDIndexEntry) error {
 	var seqid *MarshalledValue
 	var ok bool
-	if seqid, ok = (*mmap)["SeqID"]; !ok || seqid == nil || len(seqid.Bytes) == 0 {
+	if seqid, ok = mmap["SeqID"]; !ok || seqid == nil || len(seqid.Bytes) == 0 {
 		s, err := bc.cf.orm.SeqID.New()
 		if err != nil {
 			return err
@@ -128,7 +128,7 @@ func (bc *byColsIndexer) SeqIDIndex(mmap *MarshalledMap, entry *SeqIDIndexEntry)
 			return err
 		}
 		seqid = &MarshalledValue{Bytes: b, TypeInfo: tiVarchar, Dirty: true}
-		(*mmap)["SeqID"] = seqid
+		mmap["SeqID"] = seqid
 	}
 	if err := gocql.Unmarshal(tiVarchar, seqid.Bytes, &entry.SeqID); err != nil {
 		return err
@@ -136,7 +136,7 @@ func (bc *byColsIndexer) SeqIDIndex(mmap *MarshalledMap, entry *SeqIDIndexEntry)
 	entry.Key = make(MarshalledMap)
 	for _, k := range bc.cf.Options.PrimaryKey {
 		if k != "SeqID" {
-			entry.Key[k] = (*mmap)[k]
+			entry.Key[k] = mmap[k]
 		}
 	}
 	return nil
@@ -178,7 +178,7 @@ func (idx *Index) IndexCFs() []*ColumnFamily {
 	return []*ColumnFamily{idx.CF}
 }
 
-func (idx *Index) Index(cf *ColumnFamily, mmap *MarshalledMap) ([]*CQL, error) {
+func (idx *Index) Index(cf *ColumnFamily, mmap MarshalledMap) ([]*CQL, error) {
 	// TODO: handle index deletions when mutable columns are indexed
 	entry := &SeqIDIndexEntry{CF: idx.CF}
 	if err := idx.Indexer.SeqIDIndex(mmap, entry); err != nil {
@@ -236,7 +236,7 @@ func (iter *SeqIDListingIter) Next(row Row) bool {
 		iter.scanChunk()
 	}
 	if mmap, ok := <-iter.rowchan; ok {
-		iter.Err = row.Unmarshal(&mmap)
+		iter.Err = row.Unmarshal(mmap)
 		return iter.Err == nil
 	}
 	return false
@@ -266,7 +266,7 @@ func (iter *SeqIDListingIter) scanChunk() {
 					cql.Where(k+" = ?", v)
 				}
 				mmap := make(MarshalledMap)
-				if iter.Err = cql.Query().Scan(&mmap); iter.Err != nil {
+				if iter.Err = cql.Query().Scan(mmap); iter.Err != nil {
 					return
 				}
 				iter.rowchan <- mmap
@@ -299,11 +299,11 @@ func (iter *SeqIDListingIter) scanInterval() {
 			for {
 				entry := SeqIDIndexEntry{CF: iter.rowcf}
 				mmap := make(MarshalledMap)
-				entry.Marshal(&mmap)
-				if !ci.Next(&mmap) {
+				entry.Marshal(mmap)
+				if !ci.Next(mmap) {
 					break
 				}
-				if iter.Err = entry.Unmarshal(&mmap); iter.Err != nil {
+				if iter.Err = entry.Unmarshal(mmap); iter.Err != nil {
 					return
 				}
 				if entry.SeqID == "" {

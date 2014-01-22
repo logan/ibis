@@ -98,21 +98,21 @@ func rowsEqual(row1, row2 Row) bool {
 	}
 	p1 := reflect.ValueOf(row1).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
 	p2 := reflect.ValueOf(row2).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
-	if len(*p1.loaded) != len(*p2.loaded) {
+	if len(p1.loaded) != len(p2.loaded) {
 		return false
 	}
-	for k, v1 := range *p1.loaded {
-		v2, ok := (*p2.loaded)[k]
+	for k, v1 := range p1.loaded {
+		v2, ok := p2.loaded[k]
 		if !ok || !bytes.Equal(v1.Bytes, v2.Bytes) {
 			return false
 		}
 	}
 	rv1 := make(MarshalledMap)
-	if err := row1.Marshal(&rv1); err != nil {
+	if err := row1.Marshal(rv1); err != nil {
 		return false
 	}
 	rv2 := make(MarshalledMap)
-	if err := row2.Marshal(&rv2); err != nil {
+	if err := row2.Marshal(rv2); err != nil {
 		return false
 	}
 	if !reflect.DeepEqual(rv1, rv2) {

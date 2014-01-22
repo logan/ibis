@@ -194,7 +194,7 @@ func (q *CQLQuery) Iter() *CQLIter {
 	return &CQLIter{q.cql, q.q.Iter()}
 }
 
-func (q *CQLQuery) Scan(mmap *MarshalledMap) error {
+func (q *CQLQuery) Scan(mmap MarshalledMap) error {
 	q.i.Next(mmap)
 	return q.i.Close()
 }
@@ -204,7 +204,7 @@ type CQLIter struct {
 	i   *gocql.Iter
 }
 
-func (i *CQLIter) Next(mmap *MarshalledMap) bool {
+func (i *CQLIter) Next(mmap MarshalledMap) bool {
 	return i.i.Scan(mmap.PointersTo(i.cql.cols...)...)
 }
 

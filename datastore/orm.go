@@ -67,13 +67,13 @@ func placeholderList(n int) string {
 
 func (orm *Orm) PrepareCommit(cf *ColumnFamily, row Row, cas bool) ([]*CQL, error) {
 	mmap := make(MarshalledMap)
-	if err := row.Marshal(&mmap); err != nil {
+	if err := row.Marshal(mmap); err != nil {
 		return nil, err
 	}
-	return orm.precommit(cf, &mmap, cas)
+	return orm.precommit(cf, mmap, cas)
 }
 
-func (orm *Orm) precommit(cf *ColumnFamily, mmap *MarshalledMap, cas bool) ([]*CQL, error) {
+func (orm *Orm) precommit(cf *ColumnFamily, mmap MarshalledMap, cas bool) ([]*CQL, error) {
 	stmts := make([]*CQL, 0, 1)
 
 	// First allow indexes to update both Cassandra and the Row.
@@ -101,16 +101,16 @@ func (orm *Orm) precommit(cf *ColumnFamily, mmap *MarshalledMap, cas bool) ([]*C
 	} else {
 		// For an update, it makes no sense to treat primary keys as dirty.
 		for _, k := range cf.Options.PrimaryKey {
-			(*mmap)[k].Dirty = false
+			mmap[k].Dirty = false
 		}
 		selectedKeys = mmap.DirtyKeys()
 		if len(selectedKeys) > 0 {
 			cql = NewUpdate(cf)
 			for _, k := range selectedKeys {
-				cql.Set(k, (*mmap)[k])
+				cql.Set(k, mmap[k])
 			}
 			for _, k := range cf.Options.PrimaryKey {
-				cql.Where(k+" = ?", (*mmap)[k])
+				cql.Where(k+" = ?", mmap[k])
 			}
 		}
 	}
@@ -120,11 +120,11 @@ func (orm *Orm) precommit(cf *ColumnFamily, mmap *MarshalledMap, cas bool) ([]*C
 // Commit writes any modified values in the given row to the given CF.
 func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 	mmap := make(MarshalledMap)
-	if err := row.Marshal(&mmap); err != nil {
+	if err := row.Marshal(mmap); err != nil {
 		return err
 	}
 
-	stmts, err := orm.precommit(cf, &mmap, cas)
+	stmts, err := orm.precommit(cf, mmap, cas)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 	}
 
 	// Make the row unmarshal its given values, in case it is caching upon load.
-	return row.Unmarshal(&mmap)
+	return row.Unmarshal(mmap)
 }
 
 // LoadByKey loads data from a row's column family into that row. The row is selected by the given
@@ -196,7 +196,7 @@ func (orm *Orm) LoadByKey(cf *ColumnFamily, row Row, key ...interface{}) error {
 	if err := q.Scan(mmap.PointersTo(colnames...)...); err != nil {
 		return err
 	}
-	return row.Unmarshal(&mmap)
+	return row.Unmarshal(mmap)
 }
 
 // Exists checks if a row exists in a given row's column family.
