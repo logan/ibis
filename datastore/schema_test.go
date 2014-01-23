@@ -26,14 +26,3 @@ func TestReflectSchemaFrom(t *testing.T) {
 		t.Errorf("\nexpected: %+v\nreceived: %+v", expected, *schema.CFs["bags"])
 	}
 }
-
-func TestCreateStatement(t *testing.T) {
-	model := &testModel{}
-	ReflectSchemaFrom(model)
-
-	expected := "CREATE TABLE bags (D varchar, C bigint, A boolean, B double, E timestamp, F blob, PRIMARY KEY (D, C, A)) WITH comment='1'"
-	stmt := (*ColumnFamily)(model.Bags).CreateStatement()
-	if expected != stmt {
-		t.Errorf("\nexpected: %s\nreceived: %s", expected, stmt)
-	}
-}
