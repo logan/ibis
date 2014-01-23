@@ -86,7 +86,7 @@ func (rv *MarshalledMap) PointersTo(keys ...string) []interface{} {
 func (rv *MarshalledMap) DirtyKeys() []string {
 	dirties := make([]string, 0, len(*rv))
 	for k, v := range *rv {
-		if v.Dirty {
+		if v != nil && v.Dirty {
 			dirties = append(dirties, k)
 		}
 	}
