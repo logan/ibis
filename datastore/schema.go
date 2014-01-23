@@ -60,6 +60,10 @@ func ReflectSchemaFrom(model interface{}) *Schema {
 	schema := NewSchema()
 	for i := 0; i < model_type.NumField(); i++ {
 		field := model_type.Field(i)
+		if field.PkgPath != "" {
+			// non-empty PkgPath indicates unexported field, do not reflect these
+			continue
+		}
 		field_value := reflect.New(field.Type.Elem())
 		if field.Type.Implements(rcf_type) {
 			if rcf, ok := field_value.Interface().(ReflectableColumnFamily); ok {

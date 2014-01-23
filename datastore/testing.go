@@ -7,37 +7,51 @@ import "reflect"
 import "strconv"
 import "strings"
 import "testing"
-import "time"
 
 var (
 	flagCluster  = flag.String("cluster", "localhost", "cassandra nodes given as comma-separated host:port pairs")
 	flagKeyspace = flag.String("keyspace", "creative_test", "name of throwaway keyspace for testing")
 )
 
-type bagOfManyTypes struct {
-	ReflectedRow
-	A bool
-	B float64
-	C int64
-	D string
-	E time.Time
-	F []byte
+type testSeqIDGenerator uint64
+
+func (g *testSeqIDGenerator) New() (SeqID, error) {
+	*g++
+	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
 }
 
-type bagOfManyTypesTable ColumnFamily
-
-func (t *bagOfManyTypesTable) NewRow() Row {
-	row := &bagOfManyTypes{}
-	row.CF = (*ColumnFamily)(t)
-	return row.Reflect(row)
+func (g *testSeqIDGenerator) CurrentInterval() string {
+	return interval(SeqID(strconv.FormatUint(uint64(*g), 36)))
 }
 
-func (t *bagOfManyTypesTable) ConfigureCF(cf *ColumnFamily) {
-	cf.Key("D", "C", "A")
-}
-
-type testModel struct {
-	Bags *bagOfManyTypesTable
+func rowsEqual(row1, row2 Row) bool {
+	type1 := reflect.TypeOf(row1)
+	if type1 != reflect.TypeOf(row2) {
+		return false
+	}
+	p1 := reflect.ValueOf(row1).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
+	p2 := reflect.ValueOf(row2).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
+	if len(p1.loaded) != len(p2.loaded) {
+		return false
+	}
+	for k, v1 := range p1.loaded {
+		v2, ok := p2.loaded[k]
+		if !ok || !bytes.Equal(v1.Bytes, v2.Bytes) {
+			return false
+		}
+	}
+	rv1 := make(MarshalledMap)
+	if err := row1.Marshal(rv1); err != nil {
+		return false
+	}
+	rv2 := make(MarshalledMap)
+	if err := row2.Marshal(rv2); err != nil {
+		return false
+	}
+	if !reflect.DeepEqual(rv1, rv2) {
+		return false
+	}
+	return true
 }
 
 // A TestConn extends CassandraConn to manage throwaway keyspaces. This guarantees tests a pristine
@@ -90,45 +104,4 @@ func (tc *TestConn) Close() error {
 	}
 	tc.Session.Close()
 	return nil
-}
-
-func rowsEqual(row1, row2 Row) bool {
-	type1 := reflect.TypeOf(row1)
-	if type1 != reflect.TypeOf(row2) {
-		return false
-	}
-	p1 := reflect.ValueOf(row1).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
-	p2 := reflect.ValueOf(row2).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
-	if len(p1.loaded) != len(p2.loaded) {
-		return false
-	}
-	for k, v1 := range p1.loaded {
-		v2, ok := p2.loaded[k]
-		if !ok || !bytes.Equal(v1.Bytes, v2.Bytes) {
-			return false
-		}
-	}
-	rv1 := make(MarshalledMap)
-	if err := row1.Marshal(rv1); err != nil {
-		return false
-	}
-	rv2 := make(MarshalledMap)
-	if err := row2.Marshal(rv2); err != nil {
-		return false
-	}
-	if !reflect.DeepEqual(rv1, rv2) {
-		return false
-	}
-	return true
-}
-
-type testSeqIDGenerator uint64
-
-func (g *testSeqIDGenerator) New() (SeqID, error) {
-	*g++
-	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
-}
-
-func (g *testSeqIDGenerator) CurrentInterval() string {
-	return interval(SeqID(strconv.FormatUint(uint64(*g), 36)))
 }

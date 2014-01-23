@@ -3,6 +3,32 @@ package datastore
 import "testing"
 import "time"
 
+type bagOfManyTypes struct {
+	ReflectedRow
+	A bool
+	B float64
+	C int64
+	D string
+	E time.Time
+	F []byte
+}
+
+type bagOfManyTypesTable ColumnFamily
+
+func (t *bagOfManyTypesTable) NewRow() Row {
+	row := &bagOfManyTypes{}
+	row.CF = (*ColumnFamily)(t)
+	return row.Reflect(row)
+}
+
+func (t *bagOfManyTypesTable) ConfigureCF(cf *ColumnFamily) {
+	cf.Key("D", "C", "A")
+}
+
+type testModel struct {
+	Bags *bagOfManyTypesTable
+}
+
 type TestOrm struct {
 	*Orm
 	*TestConn
