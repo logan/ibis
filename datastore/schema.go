@@ -23,11 +23,6 @@ func NewSchema() *Schema {
 // AddCF adds a column family definition to the schema.
 func (s *Schema) AddCF(cf *ColumnFamily) {
 	s.CFs[strings.ToLower(cf.Name)] = cf
-	for _, idx := range cf.Options.Indexes {
-		for _, subcf := range idx.IndexCFs() {
-			s.AddCF(subcf)
-		}
-	}
 	if cf.Options.typeID == 0 {
 		cf.Options.typeID = s.nextTypeID
 		s.nextTypeID++
@@ -80,14 +75,4 @@ func ReflectSchemaFrom(model interface{}) *Schema {
 		}
 	}
 	return schema
-}
-
-func (s *Schema) IndexBy(rcf ReflectableColumnFamily, cols ...string) *Index {
-	// TODO: find a way to get to the cf without making a row
-	row := rcf.NewRow()
-	return IndexBy(row.GetCF(), cols...)
-}
-
-func (s *Schema) IndexBySeqID(rcf ReflectableColumnFamily) *Index {
-	return s.IndexBy(rcf, "SeqID")
 }

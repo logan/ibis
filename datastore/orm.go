@@ -76,19 +76,6 @@ func (orm *Orm) PrepareCommit(cf *ColumnFamily, row Row, cas bool) ([]*CQL, erro
 func (orm *Orm) precommit(cf *ColumnFamily, mmap MarshalledMap, cas bool) ([]*CQL, error) {
 	stmts := make([]*CQL, 0, 1)
 
-	// First allow indexes to update both Cassandra and the Row.
-	for _, idx := range cf.Options.Indexes {
-		idx_stmts, err := idx.Index(cf, mmap)
-		if err != nil {
-			return nil, err
-		}
-		for _, stmt := range idx_stmts {
-			if stmt != nil {
-				stmts = append(stmts, stmt)
-			}
-		}
-	}
-
 	// Generate the appropriate CQL.
 	selectedKeys := make([]string, len(cf.Columns))
 	for i, col := range cf.Columns {

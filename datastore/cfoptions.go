@@ -6,28 +6,14 @@ type OnCreateHook func(*Orm, *ColumnFamily) error
 type CFOptions struct {
 	CF            *ColumnFamily
 	PrimaryKey    []string
-	Indexes       []CFIndexer
 	onCreateHooks []OnCreateHook // If given, will be called immediately after table creation.
 	typeID        int
-	ctx           map[interface{}]interface{}
-	indexMap      map[string]*Index
 }
 
 func NewCFOptions(cf *ColumnFamily) *CFOptions {
 	o := &CFOptions{CF: cf}
-	o.Indexes = make([]CFIndexer, 0)
-	o.ctx = make(map[interface{}]interface{})
 	o.onCreateHooks = make([]OnCreateHook, 0)
-	o.indexMap = make(map[string]*Index)
 	return o
-}
-
-func (o *CFOptions) Get(key interface{}) interface{} {
-	return o.ctx[key]
-}
-
-func (o *CFOptions) Set(key, value interface{}) {
-	o.ctx[key] = value
 }
 
 func (o *CFOptions) Key(keys ...string) *CFOptions {
@@ -57,27 +43,7 @@ func (o *CFOptions) Key(keys ...string) *CFOptions {
 	return o
 }
 
-func (o *CFOptions) Index(index *Index) *CFOptions {
-	o.Indexes = append(o.Indexes, index)
-	o.indexMap[index.IndexName()] = index
-	return o
-}
-
 func (o *CFOptions) OnCreate(hook OnCreateHook) *CFOptions {
 	o.onCreateHooks = append(o.onCreateHooks, hook)
 	return o
-}
-
-func (options *CFOptions) AddIndex(indexer SeqIDIndexer) *CFOptions {
-	idx := &Index{IndexedCF: options.CF, Indexer: indexer}
-	options.Index(idx)
-	return options
-}
-
-func (options *CFOptions) AddIndexBySeqID() *CFOptions {
-	return options.AddIndex(bySeqID(options.CF))
-}
-
-func (options *CFOptions) AddIndexBy(columns ...string) *CFOptions {
-	return options.AddIndex(byCols(options.CF, columns))
 }

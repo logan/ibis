@@ -88,13 +88,6 @@ func goTypeToCassType(t reflect.Type) (string, bool) {
 // Bind returns a new ColumnFamily bound to the given *Orm.
 func (t *ColumnFamily) Bind(orm *Orm) {
 	t.orm = orm
-	for _, val := range t.Options.ctx {
-		if idx, ok := val.(CFIndexer); ok {
-			for _, subcf := range idx.IndexCFs() {
-				subcf.Bind(orm)
-			}
-		}
-	}
 }
 
 // IsBound returns true if the table is bound to an *Orm.
