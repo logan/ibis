@@ -4,6 +4,7 @@ import "bytes"
 import "flag"
 import "fmt"
 import "reflect"
+import "strconv"
 import "strings"
 import "testing"
 import "time"
@@ -119,4 +120,15 @@ func rowsEqual(row1, row2 Row) bool {
 		return false
 	}
 	return true
+}
+
+type testSeqIDGenerator uint64
+
+func (g *testSeqIDGenerator) New() (SeqID, error) {
+	*g++
+	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
+}
+
+func (g *testSeqIDGenerator) CurrentInterval() string {
+	return interval(SeqID(strconv.FormatUint(uint64(*g), 36)))
 }

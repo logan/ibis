@@ -77,19 +77,22 @@ func TestMarshalledMapDirtyKeys(t *testing.T) {
 func TestReflectedRowMarshalAndUnmarshal(t *testing.T) {
 	type R struct {
 		ReflectedRow
-		Str  string
-		Int  int64
-		Time time.Time
-		// TODO: check that SeqID is filled in
+		Str   string
+		Int   int64
+		Time  time.Time
+		SeqID SeqID
 	}
 
+	seqidgen := testSeqIDGenerator(36 * 36 * 36) // "1000" in base-36
 	var r R
 	r.CF = &ColumnFamily{
 		Columns: []Column{
 			Column{Name: "Str", typeInfo: tiVarchar},
 			Column{Name: "Int", typeInfo: tiBigInt},
 			Column{Name: "Time", typeInfo: tiTimestamp},
+			Column{Name: "SeqID", typeInfo: tiVarchar},
 		},
+		SeqID: &seqidgen,
 	}
 	r.Reflect(&r)
 
@@ -100,16 +103,23 @@ func TestReflectedRowMarshalAndUnmarshal(t *testing.T) {
 		mmap := make(MarshalledMap)
 		r.Marshal(mmap)
 		s.Unmarshal(mmap)
-		if r.Str != s.Str || r.Int != s.Int || r.Time != s.Time {
+		if r.Str != s.Str || r.Int != s.Int || r.Time != s.Time || r.SeqID != s.SeqID {
 			return fmt.Sprintf("\nexpected: %+v\nreceived: %+v", r, s), false
 		}
 		return "", true
 	}
 
 	check()
+	if r.SeqID != "1001" {
+		t.Errorf("expected seqid %s, got %s", "1001", r.SeqID)
+	}
 
 	r.Str = "str"
 	r.Int = 8
 	r.Time = time.Now()
+	r.SeqID = ""
 	check()
+	if r.SeqID != "1002" {
+		t.Errorf("expected seqid %s, got %s", "1002", r.SeqID)
+	}
 }

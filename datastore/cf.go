@@ -11,7 +11,9 @@ type ColumnFamily struct {
 	Name    string     // The name of the column family.
 	Columns []Column   // The definition of the column family's columns.
 	Options *CFOptions // Options for the column family, such as primary key.
-	orm     *Orm
+	SeqID   SeqIDGenerator
+
+	orm *Orm
 }
 
 // CreateStatement returns the CQL statement that would create this table.
@@ -88,6 +90,7 @@ func goTypeToCassType(t reflect.Type) (string, bool) {
 // Bind returns a new ColumnFamily bound to the given *Orm.
 func (t *ColumnFamily) Bind(orm *Orm) {
 	t.orm = orm
+	t.SeqID = t.orm.SeqID
 }
 
 // IsBound returns true if the table is bound to an *Orm.

@@ -125,14 +125,24 @@ func (s *ReflectedRow) loadedMap() MarshalledMap {
 }
 
 func (s *ReflectedRow) Marshal(mmap MarshalledMap) error {
+	var (
+		marshalled []byte
+		err        error
+	)
 	cf := s.GetCF()
 	loaded := s.loadedMap()
 	value := reflect.Indirect(reflect.ValueOf(s.self))
 	for _, col := range cf.Columns {
 		fieldval := value.FieldByName(col.Name)
 		if fieldval.IsValid() {
-			var marshalled []byte
-			var err error
+			if seqid, ok := fieldval.Interface().(SeqID); ok && seqid == "" {
+				if cf.SeqID != nil {
+					if seqid, err = cf.SeqID.New(); err != nil {
+						return err
+					}
+					fieldval.Set(reflect.ValueOf(seqid))
+				}
+			}
 			if t, ok := fieldval.Interface().(time.Time); ok && t.IsZero() {
 				// zero time values aren't marshalled correctly by gocql; they go into cassandra
 				// as 1754-08-30 22:43:41.129 +0000 UTC.
