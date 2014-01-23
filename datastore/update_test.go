@@ -7,7 +7,7 @@ func TestGetLiveSchema(t *testing.T) {
 	tc := NewTestConn(t)
 	defer tc.Close()
 
-	schema, err := GetLiveSchema(tc.CassandraConn)
+	schema, err := GetLiveSchema(tc.Cluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -15,7 +15,7 @@ func TestGetLiveSchema(t *testing.T) {
 		t.Fatalf("expected empty keyspace")
 	}
 
-	q := tc.Query(`
+	q := tc.Query(NewCQL(`
         CREATE TABLE test (
             blobcol blob,
             boolcol boolean,
@@ -24,7 +24,7 @@ func TestGetLiveSchema(t *testing.T) {
             stringcol varchar,
             timecol timestamp,
             PRIMARY KEY (stringcol, int64col, boolcol)
-        )`)
+        )`))
 	if err = q.Exec(); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestGetLiveSchema(t *testing.T) {
 		},
 	}
 	expected.Key("stringcol", "int64col", "boolcol")
-	schema, err = GetLiveSchema(tc.CassandraConn)
+	schema, err = GetLiveSchema(tc.Cluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestDiffLiveSchema(t *testing.T) {
 	orm := NewTestOrm(t)
 	defer orm.Close()
 
-	diff, err := DiffLiveSchema(orm.TestConn.CassandraConn, &Schema{})
+	diff, err := DiffLiveSchema(orm.TestConn.Cluster, &Schema{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestDiffLiveSchema(t *testing.T) {
 	model.CFs["T1"].Key("A")
 
 	expected := &SchemaDiff{Creations: []*ColumnFamily{model.CFs["T1"]}}
-	diff, err = DiffLiveSchema(orm.TestConn.CassandraConn, model)
+	diff, err = DiffLiveSchema(orm.TestConn.Cluster, model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestDiffLiveSchema(t *testing.T) {
 			},
 		},
 	}
-	diff, err = DiffLiveSchema(orm.TestConn.CassandraConn, model)
+	diff, err = DiffLiveSchema(orm.TestConn.Cluster, model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestDiffLiveSchema(t *testing.T) {
 	if err = diff.Apply(orm.Orm); err != nil {
 		t.Fatal(err)
 	}
-	diff, err = DiffLiveSchema(orm.TestConn.CassandraConn, &Schema{})
+	diff, err = DiffLiveSchema(orm.TestConn.Cluster, &Schema{})
 	if err != nil {
 		t.Fatal(err)
 	}

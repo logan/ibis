@@ -39,10 +39,10 @@ func NewTestOrm(t *testing.T) *TestOrm {
 	tc := NewTestConn(t)
 	model := &testModel{}
 	schema := ReflectSchemaFrom(model)
-	orm := &Orm{CassandraConn: tc.CassandraConn, Model: schema}
+	orm := &Orm{Cluster: tc.Cluster, Model: schema}
 	schema.Bind(orm)
 	var err error
-	if orm.SchemaUpdates, err = DiffLiveSchema(tc.CassandraConn, schema); err != nil {
+	if orm.SchemaUpdates, err = DiffLiveSchema(tc.Cluster, schema); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("schema:\n%s", orm.SchemaUpdates)

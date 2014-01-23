@@ -1,10 +1,7 @@
 package datastore
 
 import "errors"
-import "fmt"
 import "strings"
-
-import "tux21b.org/v1/gocql"
 
 var (
 	ErrNotFound      = errors.New("not found")
@@ -13,9 +10,9 @@ var (
 	ErrInvalidType   = errors.New("invalid row type")
 )
 
-// An Orm binds a Schema to a CassandraConn.
+// An Orm binds a Schema to a Cluster.
 type Orm struct {
-	*CassandraConn
+	Cluster
 	Model         *Schema     // The column families to use in this keyspace.
 	SchemaUpdates *SchemaDiff // The differences found between the existing column families and the given Model.
 	SeqID         SeqIDGenerator
@@ -28,7 +25,7 @@ func DialOrm(config CassandraConfig, model *Schema) (*Orm, error) {
 	if err != nil {
 		return nil, err
 	}
-	orm := &Orm{CassandraConn: conn, Model: model}
+	orm := &Orm{Cluster: conn, Model: model}
 	orm.SchemaUpdates, err = DiffLiveSchema(conn, model)
 	if err != nil {
 		return nil, err
@@ -118,12 +115,8 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 
 	// Apply all but the final statement as a batch (as these should be index updates).
 	if len(stmts) > 1 {
-		batch := gocql.NewBatch(gocql.LoggedBatch)
-		for _, cql := range stmts[:len(stmts)-1] {
-			compiled := cql.compile()
-			batch.Query(compiled.term, compiled.params...)
-		}
-		if err = orm.Session.ExecuteBatch(batch); err != nil {
+		qiter := orm.Cluster.Query(stmts[:len(stmts)-1]...)
+		if err = qiter.Close(); err != nil {
 			return err
 		}
 	}
@@ -133,8 +126,7 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 	if cql == nil {
 		return nil
 	}
-	compiled := cql.compile()
-	q := orm.Query(compiled.term, compiled.params...)
+	qiter := orm.Cluster.Query(cql)
 	if cas {
 		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
 		// indicating success, and a row with the values that were committed. We don't need this
@@ -146,14 +138,15 @@ func (orm *Orm) Commit(cf *ColumnFamily, row Row, cas bool) error {
 			selectedKeys[i] = col.Name
 		}
 		pointers := casmap.PointersTo(selectedKeys...)
-		if applied, err := q.ScanCAS(pointers...); !applied || err != nil {
+		if applied := qiter.ScanCAS(pointers...); !applied {
+			err := qiter.Close()
 			if err == nil {
 				err = ErrAlreadyExists
 			}
 			return err
 		}
 	} else {
-		if err := q.Exec(); err != nil {
+		if err := qiter.Exec(); err != nil {
 			return err
 		}
 	}
@@ -170,35 +163,28 @@ func (orm *Orm) LoadByKey(cf *ColumnFamily, row Row, key ...interface{}) error {
 		colnames[i] = col.Name
 	}
 
-	pkdef := cf.PrimaryKey
-	rules := make([]string, len(pkdef))
-	for i, k := range pkdef {
-		rules[i] = fmt.Sprintf("%s = ?", k)
+	cql := NewSelect(cf).Cols(colnames...)
+	for i, k := range cf.PrimaryKey {
+		cql.Where(k+" = ?", key[i])
 	}
-
-	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s",
-		strings.Join(colnames, ", "), cf.Name, strings.Join(rules, " AND "))
-	q := orm.Query(stmt, key...)
+	qiter := orm.Query(cql)
 	mmap := make(MarshalledMap)
-	if err := q.Scan(mmap.PointersTo(colnames...)...); err != nil {
-		return err
+	if !qiter.Scan(mmap.PointersTo(colnames...)...) {
+		return qiter.Close()
 	}
 	return row.Unmarshal(mmap)
 }
 
 // Exists checks if a row exists in a given row's column family.
 func (orm *Orm) Exists(cf *ColumnFamily, key ...interface{}) (bool, error) {
-	pkdef := cf.PrimaryKey
-	rules := make([]string, len(pkdef))
-	for i, k := range pkdef {
-		rules[i] = fmt.Sprintf("%s = ?", k)
+	cql := NewSelect(cf).Cols("COUNT(*)")
+	for i, k := range cf.PrimaryKey {
+		cql.Where(k+" = ?", key[i])
 	}
-
-	stmt := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", cf.Name, strings.Join(rules, " AND "))
-	q := orm.Query(stmt, key...)
+	qiter := orm.Query(cql)
 	var count int
-	if err := q.Scan(&count); err != nil {
-		return false, err
+	if !qiter.Scan(&count) {
+		return false, qiter.Close()
 	}
 	return count > 0, nil
 }

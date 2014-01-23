@@ -3,8 +3,6 @@ package datastore
 import "fmt"
 import "strings"
 
-import "tux21b.org/v1/gocql"
-
 type CQL struct {
 	cf      *ColumnFamily
 	cmd     string
@@ -16,10 +14,13 @@ type CQL struct {
 	set     boundPartGroup
 	limit   int
 	cas     bool
+	raw     boundPart
 }
 
 func (cql *CQL) compile() boundPart {
 	switch cql.cmd {
+	case "":
+		return cql.raw
 	case "SELECT":
 		where := cql.where.join("WHERE", " AND ")
 		orderBy := cql.orderBy.join("ORDER BY", ", ")
@@ -66,14 +67,8 @@ func (cql *CQL) String() string {
 	return compiled.term
 }
 
-func (cql *CQL) Query() *CQLQuery {
-	compiled := cql.compile()
-	q := &CQLQuery{
-		cql: cql,
-		q:   cql.cf.orm.Query(compiled.term, compiled.params...),
-	}
-	q.i = q.Iter()
-	return q
+func (cql *CQL) Query() Query {
+	return cql.cf.orm.Cluster.Query(cql)
 }
 
 func (cql *CQL) Cols(keys ...string) *CQL {
@@ -132,27 +127,24 @@ func (cql *CQL) Limit(limit int) *CQL {
 	return cql
 }
 
-func NewCQL(cf *ColumnFamily, cmd string) *CQL {
-	return &CQL{
-		cf:  cf,
-		cmd: cmd,
-	}
+func NewCQL(stmt string, params ...interface{}) *CQL {
+	return &CQL{cmd: "", raw: boundPart{stmt, params}}
 }
 
 func NewSelect(cf *ColumnFamily) *CQL {
-	return NewCQL(cf, "SELECT")
+	return &CQL{cf: cf, cmd: "SELECT"}
 }
 
 func NewInsert(cf *ColumnFamily) *CQL {
-	return NewCQL(cf, "INSERT")
+	return &CQL{cf: cf, cmd: "INSERT"}
 }
 
 func NewUpdate(cf *ColumnFamily) *CQL {
-	return NewCQL(cf, "UPDATE")
+	return &CQL{cf: cf, cmd: "UPDATE"}
 }
 
 func NewDelete(cf *ColumnFamily) *CQL {
-	return NewCQL(cf, "DELETE")
+	return &CQL{cf: cf, cmd: "DELETE"}
 }
 
 type boundPart struct {
@@ -182,32 +174,4 @@ func (parts boundPartGroup) join(prefix, conn string) (result boundPart) {
 		}
 	}
 	return
-}
-
-type CQLQuery struct {
-	cql *CQL
-	q   *gocql.Query
-	i   *CQLIter
-}
-
-func (q *CQLQuery) Iter() *CQLIter {
-	return &CQLIter{q.cql, q.q.Iter()}
-}
-
-func (q *CQLQuery) Scan(mmap MarshalledMap) error {
-	q.i.Next(mmap)
-	return q.i.Close()
-}
-
-type CQLIter struct {
-	cql *CQL
-	i   *gocql.Iter
-}
-
-func (i *CQLIter) Next(mmap MarshalledMap) bool {
-	return i.i.Scan(mmap.PointersTo(i.cql.cols...)...)
-}
-
-func (i *CQLIter) Close() error {
-	return i.i.Close()
 }

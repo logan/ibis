@@ -21,7 +21,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 	cf.Key("Str")
 
 	expect := func(expected string) (string, bool) {
-		received := cf.CreateStatement()
+		received := cf.CreateStatement().String()
 		if expected != received {
 			return fmt.Sprintf("\nexpected: %s\nreceived: %s", expected, received), false
 		}

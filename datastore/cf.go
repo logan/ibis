@@ -52,7 +52,7 @@ func (cf *ColumnFamily) OnCreate(hook OnCreateHook) *ColumnFamily {
 }
 
 // CreateStatement returns the CQL statement that would create this table.
-func (t *ColumnFamily) CreateStatement() string {
+func (t *ColumnFamily) CreateStatement() *CQL {
 	cols := make([]string, len(t.Columns))
 	for i, col := range t.Columns {
 		cols[i] = fmt.Sprintf("%s %s", col.Name, col.Type)
@@ -61,8 +61,9 @@ func (t *ColumnFamily) CreateStatement() string {
 	if t.typeID != 0 {
 		options = fmt.Sprintf(" WITH comment='%d'", t.typeID)
 	}
-	return fmt.Sprintf("CREATE TABLE %s (%s, PRIMARY KEY (%s))%s",
+	stmt := fmt.Sprintf("CREATE TABLE %s (%s, PRIMARY KEY (%s))%s",
 		t.Name, strings.Join(cols, ", "), strings.Join(t.PrimaryKey, ", "), options)
+	return NewCQL(stmt)
 }
 
 // A Column gives the name and data type of a Cassandra column. The value of type should be a CQL

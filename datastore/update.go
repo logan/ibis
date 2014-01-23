@@ -5,8 +5,6 @@ import "fmt"
 import "strconv"
 import "strings"
 
-import "tux21b.org/v1/gocql"
-
 // A SchemaDiff enumerates the changes necessary to transform one schema into another.
 type SchemaDiff struct {
 	Creations   []*ColumnFamily   // tables that are completely missing from the former schema
@@ -25,10 +23,12 @@ func (d *SchemaDiff) String() string {
 	}
 	changes := make([]string, 0, d.Size())
 	for _, t := range d.Creations {
-		changes = append(changes, t.CreateStatement())
+		changes = append(changes, t.CreateStatement().String())
 	}
 	for _, a := range d.Alterations {
-		changes = append(changes, a.AlterStatements()...)
+		for _, cql := range a.AlterStatements() {
+			changes = append(changes, cql.String())
+		}
 	}
 	return strings.Join(changes, "\n")
 }
@@ -68,24 +68,25 @@ func (a TableAlteration) Size() int {
 }
 
 // AlterStatements generates a list of CQL statements, one for each new or altered column.
-func (a TableAlteration) AlterStatements() []string {
-	alts := make([]string, 0, a.Size())
+func (a TableAlteration) AlterStatements() []*CQL {
+	alts := make([]*CQL, 0, a.Size())
 	for _, col := range a.NewColumns {
-		alts = append(alts, fmt.Sprintf("ALTER TABLE %s ADD %s %s",
-			a.TableName, col.Name, col.Type))
+		cql := NewCQL(fmt.Sprintf("ALTER TABLE %s ADD %s %s", a.TableName, col.Name, col.Type))
+		alts = append(alts, cql)
 	}
 	for _, col := range a.AlteredColumns {
-		alts = append(alts, fmt.Sprintf("ALTER TABLE %s ALTER %s TYPE %s",
+		cql := NewCQL(fmt.Sprintf("ALTER TABLE %s ALTER %s TYPE %s",
 			a.TableName, col.Name, col.Type))
+		alts = append(alts, cql)
 	}
 	return alts
 }
 
 // GetLiveSchema builds a schema by querying the column families that exist in the connected
 // keyspace.
-func GetLiveSchema(c *CassandraConn) (*Schema, error) {
+func GetLiveSchema(c Cluster) (*Schema, error) {
 	var err error
-	tables, nextTypeID, err := getLiveColumnFamilies(c.Session, c.Config.Keyspace)
+	tables, nextTypeID, err := getLiveColumnFamilies(c, c.GetKeyspace())
 	if err != nil {
 		return nil, err
 	}
@@ -96,12 +97,13 @@ func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 	for _, t := range tables {
 		schema.CFs[strings.ToLower(t.Name)] = t
 	}
-	q := c.Query(
-		`SELECT columnfamily_name, column_name, validator FROM system.schema_columns
-             WHERE keyspace_name = ?`, c.Config.Keyspace)
-	i := q.Iter()
+	cf := &ColumnFamily{Name: "system.schema_columns"}
+	cql := NewSelect(cf)
+	cql.Cols("columnfamily_name", "column_name", "validator")
+	cql.Where("keyspace_name = ?", c.GetKeyspace())
+	qiter := c.Query(cql)
 	var cf_name, col_name, validator string
-	for i.Scan(&cf_name, &col_name, &validator) {
+	for qiter.Scan(&cf_name, &col_name, &validator) {
 		col := Column{Name: col_name, Type: typeFromValidator(validator)}
 		t := schema.CFs[cf_name]
 		t.Columns = append(t.Columns, col)
@@ -110,18 +112,19 @@ func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 		// reapply primary key to fix column ordering
 		cf.Key(cf.PrimaryKey...)
 	}
-	return &schema, i.Close()
+	return &schema, qiter.Close()
 }
 
-func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*ColumnFamily, int, error) {
-	q := session.Query(
-		`SELECT columnfamily_name, key_aliases, column_aliases, comment
-             FROM system.schema_columnfamilies WHERE keyspace_name = ?`, keyspace)
+func getLiveColumnFamilies(cluster Cluster, keyspace string) ([]*ColumnFamily, int, error) {
+	cf := &ColumnFamily{Name: "system.schema_columnfamilies"}
+	cql := NewSelect(cf)
+	cql.Cols("columnfamily_name", "key_aliases", "column_aliases", "comment")
+	cql.Where("keyspace_name = ?", keyspace)
+	qiter := cluster.Query(cql)
 	tables := make([]*ColumnFamily, 0, 32)
 	var cf_name, key_aliases, column_aliases, comment string
 	maxTypeID := 0
-	i := q.Iter()
-	for i.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
+	for qiter.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
 		t := ColumnFamily{Name: cf_name, Columns: make([]Column, 0, 16)}
 		t.Key(keyFromAliases(key_aliases, column_aliases)...)
 		t.typeID = typeIDFromComment(comment)
@@ -130,7 +133,7 @@ func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*ColumnFa
 		}
 		tables = append(tables, &t)
 	}
-	return tables, maxTypeID + 1, i.Close()
+	return tables, maxTypeID + 1, qiter.Close()
 }
 
 func typeIDFromComment(comment string) int {
@@ -164,7 +167,7 @@ func keyFromAliases(key_aliases, column_aliases string) []string {
 // SchemaDiff will be empty.
 //
 // This function also modifies the given model, to fix typeIDs of tables that exist in Cassandra.
-func DiffLiveSchema(c *CassandraConn, model *Schema) (*SchemaDiff, error) {
+func DiffLiveSchema(c Cluster, model *Schema) (*SchemaDiff, error) {
 	var live *Schema
 	var err error
 	if live, err = GetLiveSchema(c); err != nil {

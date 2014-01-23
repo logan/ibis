@@ -67,3 +67,68 @@ func parseConsistency(value string) (consistency gocql.Consistency) {
 	}
 	return
 }
+
+func (conn *CassandraConn) GetKeyspace() string {
+	return conn.Config.Keyspace
+}
+
+func (conn *CassandraConn) Query(stmts ...*CQL) Query {
+	if len(stmts) == 0 {
+		return nil
+	}
+	if len(stmts) > 1 {
+		return conn.queryBatch(stmts)
+	}
+	return conn.query(stmts[0])
+}
+
+func (conn *CassandraConn) query(stmt *CQL) Query {
+	compiled := stmt.compile()
+	return (*cassQuery)(conn.Session.Query(compiled.term, compiled.params...).Iter())
+}
+
+func (conn *CassandraConn) queryBatch(stmts []*CQL) Query {
+	batch := gocql.NewBatch(gocql.LoggedBatch)
+	for _, stmt := range stmts {
+		compiled := stmt.compile()
+		batch.Query(compiled.term, compiled.params...)
+	}
+	return &cassBatchQuery{conn.Session.ExecuteBatch(batch)}
+}
+
+type cassBatchQuery struct{ error }
+
+func (iter *cassBatchQuery) Close() error                     { return iter.error }
+func (iter *cassBatchQuery) Exec() error                      { return iter.Close() }
+func (iter *cassBatchQuery) ScanCAS(dest ...interface{}) bool { return false }
+func (iter *cassBatchQuery) Scan(dest ...interface{}) bool    { return false }
+
+type cassQuery gocql.Iter
+
+func (iter *cassQuery) Close() error {
+	return (*gocql.Iter)(iter).Close()
+}
+
+func (iter *cassQuery) Exec() error {
+	return iter.Close()
+}
+
+func (iter *cassQuery) ScanCAS(dest ...interface{}) bool {
+	// As of 2014-01-23, gocql.Iter.Close has no side effect.
+	if iter.Close() != nil {
+		return false
+	}
+	var applied bool
+	i := (*gocql.Iter)(iter)
+	if len(i.Columns()) > 1 {
+		dest = append([]interface{}{&applied}, dest...)
+		i.Scan(dest...)
+	} else {
+		i.Scan(&applied)
+	}
+	return applied
+}
+
+func (iter *cassQuery) Scan(dest ...interface{}) bool {
+	return (*gocql.Iter)(iter).Scan(dest...)
+}
