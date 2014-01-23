@@ -6,14 +6,49 @@ import "strings"
 
 import "tux21b.org/v1/gocql"
 
+type OnCreateHook func(*ColumnFamily) error
+
 // A ColumnFamily describes how rows of a table are stored in Cassandra.
 type ColumnFamily struct {
-	Name    string     // The name of the column family.
-	Columns []Column   // The definition of the column family's columns.
-	Options *CFOptions // Options for the column family, such as primary key.
-	SeqID   SeqIDGenerator
+	Name       string   // The name of the column family.
+	Columns    []Column // The definition of the column family's columns.
+	SeqID      SeqIDGenerator
+	PrimaryKey []string
 
-	orm *Orm
+	orm           *Orm
+	onCreateHooks []OnCreateHook
+	typeID        int
+}
+
+func (cf *ColumnFamily) Key(keys ...string) *ColumnFamily {
+	cf.PrimaryKey = keys
+
+	// primary key columns must come first and in order
+	rearranged := make([]Column, len(cf.Columns))
+	keymap := make(map[string]bool)
+	for i, k := range keys {
+		for _, col := range cf.Columns {
+			if k == col.Name {
+				keymap[k] = true
+				rearranged[i] = col
+				break
+			}
+		}
+	}
+	i := len(keys)
+	for _, col := range cf.Columns {
+		if _, ok := keymap[col.Name]; !ok {
+			rearranged[i] = col
+			i++
+		}
+	}
+	copy(cf.Columns, rearranged)
+	return cf
+}
+
+func (cf *ColumnFamily) OnCreate(hook OnCreateHook) *ColumnFamily {
+	cf.onCreateHooks = append(cf.onCreateHooks, hook)
+	return cf
 }
 
 // CreateStatement returns the CQL statement that would create this table.
@@ -23,11 +58,11 @@ func (t *ColumnFamily) CreateStatement() string {
 		cols[i] = fmt.Sprintf("%s %s", col.Name, col.Type)
 	}
 	var options string
-	if t.Options.typeID != 0 {
-		options = fmt.Sprintf(" WITH comment='%d'", t.Options.typeID)
+	if t.typeID != 0 {
+		options = fmt.Sprintf(" WITH comment='%d'", t.typeID)
 	}
 	return fmt.Sprintf("CREATE TABLE %s (%s, PRIMARY KEY (%s))%s",
-		t.Name, strings.Join(cols, ", "), strings.Join(t.Options.PrimaryKey, ", "), options)
+		t.Name, strings.Join(cols, ", "), strings.Join(t.PrimaryKey, ", "), options)
 }
 
 // A Column gives the name and data type of a Cassandra column. The value of type should be a CQL

@@ -87,7 +87,7 @@ func (orm *Orm) precommit(cf *ColumnFamily, mmap MarshalledMap, cas bool) ([]*CQ
 		cql.IfNotExists()
 	} else {
 		// For an update, it makes no sense to treat primary keys as dirty.
-		for _, k := range cf.Options.PrimaryKey {
+		for _, k := range cf.PrimaryKey {
 			mmap[k].Dirty = false
 		}
 		selectedKeys = mmap.DirtyKeys()
@@ -96,7 +96,7 @@ func (orm *Orm) precommit(cf *ColumnFamily, mmap MarshalledMap, cas bool) ([]*CQ
 			for _, k := range selectedKeys {
 				cql.Set(k, mmap[k])
 			}
-			for _, k := range cf.Options.PrimaryKey {
+			for _, k := range cf.PrimaryKey {
 				cql.Where(k+" = ?", mmap[k])
 			}
 		}
@@ -170,7 +170,7 @@ func (orm *Orm) LoadByKey(cf *ColumnFamily, row Row, key ...interface{}) error {
 		colnames[i] = col.Name
 	}
 
-	pkdef := cf.Options.PrimaryKey
+	pkdef := cf.PrimaryKey
 	rules := make([]string, len(pkdef))
 	for i, k := range pkdef {
 		rules[i] = fmt.Sprintf("%s = ?", k)
@@ -188,7 +188,7 @@ func (orm *Orm) LoadByKey(cf *ColumnFamily, row Row, key ...interface{}) error {
 
 // Exists checks if a row exists in a given row's column family.
 func (orm *Orm) Exists(cf *ColumnFamily, key ...interface{}) (bool, error) {
-	pkdef := cf.Options.PrimaryKey
+	pkdef := cf.PrimaryKey
 	rules := make([]string, len(pkdef))
 	for i, k := range pkdef {
 		rules[i] = fmt.Sprintf("%s = ?", k)

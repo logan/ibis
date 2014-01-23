@@ -32,8 +32,8 @@ func (t *bagOfManyTypesTable) NewRow() Row {
 	return row.Reflect(row)
 }
 
-func (t *bagOfManyTypesTable) ConfigureCF(options *CFOptions) {
-	options.Key("D", "C", "A")
+func (t *bagOfManyTypesTable) ConfigureCF(cf *ColumnFamily) {
+	cf.Key("D", "C", "A")
 }
 
 type testModel struct {

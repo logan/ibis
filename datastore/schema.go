@@ -23,8 +23,8 @@ func NewSchema() *Schema {
 // AddCF adds a column family definition to the schema.
 func (s *Schema) AddCF(cf *ColumnFamily) {
 	s.CFs[strings.ToLower(cf.Name)] = cf
-	if cf.Options.typeID == 0 {
-		cf.Options.typeID = s.nextTypeID
+	if cf.typeID == 0 {
+		cf.typeID = s.nextTypeID
 		s.nextTypeID++
 	}
 }
@@ -42,7 +42,7 @@ func (s *Schema) IsBound() bool {
 }
 
 type ReflectableColumnFamily interface {
-	ConfigureCF(*CFOptions)
+	ConfigureCF(*ColumnFamily)
 	NewRow() Row
 }
 
@@ -64,10 +64,9 @@ func ReflectSchemaFrom(model interface{}) *Schema {
 		if field.Type.Implements(rcf_type) {
 			if rcf, ok := field_value.Interface().(ReflectableColumnFamily); ok {
 				cf := &ColumnFamily{}
-				cf.Options = NewCFOptions(cf)
 				row := rcf.NewRow()
 				cf.fillFromRowType(field.Name, reflect.TypeOf(row))
-				rcf.ConfigureCF(cf.Options)
+				rcf.ConfigureCF(cf)
 				schema.AddCF(cf)
 				cf_value := reflect.ValueOf(cf).Convert(field.Type)
 				model_value.FieldByIndex(field.Index).Set(cf_value)

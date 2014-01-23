@@ -39,8 +39,8 @@ func (d *SchemaDiff) Apply(orm *Orm) error {
 		if err := orm.Query(t.CreateStatement()).Exec(); err != nil {
 			return err
 		}
-		for _, hook := range t.Options.onCreateHooks {
-			if err := hook(orm, t); err != nil {
+		for _, hook := range t.onCreateHooks {
+			if err := hook(t); err != nil {
 				return err
 			}
 		}
@@ -108,7 +108,7 @@ func GetLiveSchema(c *CassandraConn) (*Schema, error) {
 	}
 	for _, cf := range schema.CFs {
 		// reapply primary key to fix column ordering
-		cf.Options.Key(cf.Options.PrimaryKey...)
+		cf.Key(cf.PrimaryKey...)
 	}
 	return &schema, i.Close()
 }
@@ -123,10 +123,10 @@ func getLiveColumnFamilies(session *gocql.Session, keyspace string) ([]*ColumnFa
 	i := q.Iter()
 	for i.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
 		t := ColumnFamily{Name: cf_name, Columns: make([]Column, 0, 16)}
-		t.Options = NewCFOptions(&t).Key(keyFromAliases(key_aliases, column_aliases)...)
-		t.Options.typeID = typeIDFromComment(comment)
-		if t.Options.typeID > maxTypeID {
-			maxTypeID = t.Options.typeID
+		t.Key(keyFromAliases(key_aliases, column_aliases)...)
+		t.typeID = typeIDFromComment(comment)
+		if t.typeID > maxTypeID {
+			maxTypeID = t.typeID
 		}
 		tables = append(tables, &t)
 	}
@@ -171,11 +171,11 @@ func DiffLiveSchema(c *CassandraConn, model *Schema) (*SchemaDiff, error) {
 		return nil, err
 	}
 	for _, t := range live.CFs {
-		if t.Options.typeID >= model.nextTypeID {
-			model.nextTypeID = t.Options.typeID + 1
+		if t.typeID >= model.nextTypeID {
+			model.nextTypeID = t.typeID + 1
 		}
 		if model_t, ok := model.CFs[t.Name]; ok {
-			model_t.Options.typeID = t.Options.typeID
+			model_t.typeID = t.typeID
 		}
 	}
 	var diff = &SchemaDiff{make([]*ColumnFamily, 0), make([]TableAlteration, 0)}
@@ -201,7 +201,7 @@ func DiffLiveSchema(c *CassandraConn, model *Schema) (*SchemaDiff, error) {
 				diff.Alterations = append(diff.Alterations, alteration)
 			}
 		} else {
-			model_table.Options.typeID = model.nextTypeID
+			model_table.typeID = model.nextTypeID
 			model.nextTypeID++
 			diff.Creations = append(diff.Creations, model_table)
 		}

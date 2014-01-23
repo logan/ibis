@@ -5,7 +5,7 @@ import "reflect"
 import "testing"
 import "time"
 
-func TestFillFromRowTypeAndCreateStatement(t *testing.T) {
+func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 	type table struct {
 		Str    string
 		Int    int64
@@ -17,8 +17,8 @@ func TestFillFromRowTypeAndCreateStatement(t *testing.T) {
 	}
 
 	cf := &ColumnFamily{}
-	cf.Options = NewCFOptions(cf).Key("Str")
 	cf.fillFromRowType("test", reflect.TypeOf(&table{}))
+	cf.Key("Str")
 
 	expect := func(expected string) (string, bool) {
 		received := cf.CreateStatement()
@@ -34,8 +34,8 @@ func TestFillFromRowTypeAndCreateStatement(t *testing.T) {
 		t.Error(msg)
 	}
 
-	cf.Options.Key("Double", "Time", "Blob")
-	cf.Options.typeID = 8
+	cf.Key("Double", "Time", "Blob")
+	cf.typeID = 8
 
 	if msg, ok := expect("CREATE TABLE test (Double double, Time timestamp, Blob blob," +
 		" Str varchar, Int bigint, Bool boolean, SeqID varchar," +
