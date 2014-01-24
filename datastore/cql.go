@@ -17,6 +17,11 @@ type CQL struct {
 	raw     boundPart
 }
 
+func (cql *CQL) Build() (string, []interface{}) {
+	bp := cql.compile()
+	return bp.term, bp.params
+}
+
 func (cql *CQL) compile() boundPart {
 	switch cql.cmd {
 	case "":

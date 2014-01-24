@@ -87,10 +87,10 @@ func TestReflectedRowMarshalAndUnmarshal(t *testing.T) {
 	var r R
 	r.CF = &ColumnFamily{
 		Columns: []Column{
-			Column{Name: "Str", typeInfo: tiVarchar},
-			Column{Name: "Int", typeInfo: tiBigInt},
-			Column{Name: "Time", typeInfo: tiTimestamp},
-			Column{Name: "SeqID", typeInfo: tiVarchar},
+			Column{Name: "Str", typeInfo: TIVarchar},
+			Column{Name: "Int", typeInfo: TIBigInt},
+			Column{Name: "Time", typeInfo: TITimestamp},
+			Column{Name: "SeqID", typeInfo: TIVarchar},
 		},
 		SeqID: &seqidgen,
 	}

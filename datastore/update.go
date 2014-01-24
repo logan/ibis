@@ -106,7 +106,9 @@ func GetLiveSchema(c Cluster) (*Schema, error) {
 	for qiter.Scan(&cf_name, &col_name, &validator) {
 		col := Column{Name: col_name, Type: typeFromValidator(validator)}
 		t := schema.CFs[cf_name]
-		t.Columns = append(t.Columns, col)
+		if t != nil {
+			t.Columns = append(t.Columns, col)
+		}
 	}
 	for _, cf := range schema.CFs {
 		// reapply primary key to fix column ordering

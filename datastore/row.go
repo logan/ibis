@@ -2,6 +2,7 @@ package datastore
 
 import "bytes"
 import "errors"
+import "fmt"
 import "reflect"
 import "time"
 
@@ -22,21 +23,21 @@ var columnTypeMap = map[string]string{
 }
 
 var (
-	tiBoolean   = &gocql.TypeInfo{Type: gocql.TypeBoolean}
-	tiBlob      = &gocql.TypeInfo{Type: gocql.TypeBlob}
-	tiDouble    = &gocql.TypeInfo{Type: gocql.TypeDouble}
-	tiBigInt    = &gocql.TypeInfo{Type: gocql.TypeBigInt}
-	tiVarchar   = &gocql.TypeInfo{Type: gocql.TypeVarchar}
-	tiTimestamp = &gocql.TypeInfo{Type: gocql.TypeTimestamp}
+	TIBoolean   = &gocql.TypeInfo{Type: gocql.TypeBoolean}
+	TIBlob      = &gocql.TypeInfo{Type: gocql.TypeBlob}
+	TIDouble    = &gocql.TypeInfo{Type: gocql.TypeDouble}
+	TIBigInt    = &gocql.TypeInfo{Type: gocql.TypeBigInt}
+	TIVarchar   = &gocql.TypeInfo{Type: gocql.TypeVarchar}
+	TITimestamp = &gocql.TypeInfo{Type: gocql.TypeTimestamp}
 )
 
 var typeInfoMap = map[string]*gocql.TypeInfo{
-	"boolean":   tiBoolean,
-	"blob":      tiBlob,
-	"double":    tiDouble,
-	"bigint":    tiBigInt,
-	"varchar":   tiVarchar,
-	"timestamp": tiTimestamp,
+	"boolean":   TIBoolean,
+	"blob":      TIBlob,
+	"double":    TIDouble,
+	"bigint":    TIBigInt,
+	"varchar":   TIVarchar,
+	"timestamp": TITimestamp,
 }
 
 var column_validators = map[string]string{
@@ -83,6 +84,24 @@ func (rv *MarshalledMap) PointersTo(keys ...string) []interface{} {
 	return result
 }
 
+func (rv *MarshalledMap) ValuesOf(keys ...string) []*MarshalledValue {
+	result := make([]*MarshalledValue, len(keys))
+	for i, k := range keys {
+		result[i] = (*rv)[k]
+	}
+	return result
+}
+
+func (rv *MarshalledMap) Keys() []string {
+	keys := make([]string, 0, len(*rv))
+	for k, v := range *rv {
+		if v != nil {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
 func (rv *MarshalledMap) DirtyKeys() []string {
 	dirties := make([]string, 0, len(*rv))
 	for k, v := range *rv {
@@ -91,6 +110,78 @@ func (rv *MarshalledMap) DirtyKeys() []string {
 		}
 	}
 	return dirties
+}
+
+func (v *MarshalledValue) Cmp(w *MarshalledValue) (int, error) {
+	if v.TypeInfo != w.TypeInfo {
+		return 0, errors.New("different types are not comparable")
+	}
+
+	x, err := unmarshal((*MarshalledValue)(v))
+	if err != nil {
+		return 0, err
+	}
+	y, err := unmarshal((*MarshalledValue)(w))
+	if err != nil {
+		return 0, err
+	}
+
+	switch x.(type) {
+	case bool:
+		b1 := x.(bool)
+		b2 := y.(bool)
+		if b1 {
+			if b2 {
+				return 0, nil
+			} else {
+				return 1, nil
+			}
+		} else {
+			if b2 {
+				return -1, nil
+			} else {
+				return 0, nil
+			}
+		}
+	case []byte:
+		b1 := x.([]byte)
+		return bytes.Compare(b1, y.([]byte)), nil
+	case float64:
+		f1 := x.(float64)
+		f2 := y.(float64)
+		if f1 == f2 {
+			return 0, nil
+		}
+		if f1 < f2 {
+			return -1, nil
+		}
+		return 1, nil
+	case int64:
+		i1 := x.(int64)
+		i2 := y.(int64)
+		if i1 == i2 {
+			return 0, nil
+		}
+		if i1 < i2 {
+			return -1, nil
+		}
+		return 1, nil
+	case string:
+		s1 := x.(string)
+		return bytes.Compare([]byte(s1), []byte(y.(string))), nil
+	case time.Time:
+		t1 := x.(time.Time)
+		t2 := y.(time.Time)
+		if t1.Equal(t2) {
+			return 0, nil
+		}
+		if t1.Before(t2) {
+			return -1, nil
+		}
+		return 1, nil
+	default:
+		return 0, errors.New(fmt.Sprintf("don't know how to compare %T", x))
+	}
 }
 
 // A Row is capable of pointing to its column family and marshalling/unmarshalling itself.
@@ -178,7 +269,7 @@ func (s *ReflectedRow) Unmarshal(mmap MarshalledMap) error {
 			// time at 0 relative to its own epoch, we should zero it relative to time.Time's epoch
 			if t, ok := target.Addr().Interface().(*time.Time); ok {
 				var x int64
-				if err := gocql.Unmarshal(tiBigInt, v.Bytes, &x); err != nil {
+				if err := gocql.Unmarshal(TIBigInt, v.Bytes, &x); err != nil {
 					return err
 				}
 				if x == 0 {

@@ -45,7 +45,6 @@ func NewTestOrm(t *testing.T) *TestOrm {
 	if orm.SchemaUpdates, err = DiffLiveSchema(tc.Cluster, schema); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("schema:\n%s", orm.SchemaUpdates)
 	if err = orm.ApplySchemaUpdates(); err != nil {
 		t.Fatal(err)
 	}

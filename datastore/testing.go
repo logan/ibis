@@ -9,7 +9,7 @@ import "strings"
 import "testing"
 
 var (
-	flagCluster  = flag.String("cluster", "localhost", "cassandra nodes given as comma-separated host:port pairs")
+	flagCluster  = flag.String("cluster", "", "cassandra nodes given as comma-separated host:port pairs")
 	flagKeyspace = flag.String("keyspace", "creative_test", "name of throwaway keyspace for testing")
 )
 
@@ -54,6 +54,13 @@ func rowsEqual(row1, row2 Row) bool {
 	return true
 }
 
+func connect(config CassandraConfig) (Cluster, error) {
+	if config.Node[0] == "" {
+		return newFakeCluster(), nil
+	}
+	return DialCassandra(config)
+}
+
 // A TestConn extends Cluster to manage throwaway keyspaces. This guarantees tests a pristine
 // environment before interacting with Cassandra.
 type TestConn struct {
@@ -72,7 +79,7 @@ func NewTestConn(t *testing.T) *TestConn {
 	}
 
 	config.Keyspace = *flagKeyspace
-	c, err := DialCassandra(config)
+	c, err := connect(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +88,7 @@ func NewTestConn(t *testing.T) *TestConn {
 }
 
 func initKeyspace(config CassandraConfig) error {
-	c, err := DialCassandra(config)
+	c, err := connect(config)
 	if err != nil {
 		return err
 	}

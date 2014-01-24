@@ -30,8 +30,8 @@ func TestReflectSchemaFrom(t *testing.T) {
 	expected := &ColumnFamily{
 		Name: "t",
 		Columns: []Column{
-			Column{Name: "Str", Type: "varchar", typeInfo: tiVarchar},
-			Column{Name: "Int", Type: "bigint", typeInfo: tiBigInt},
+			Column{Name: "Str", Type: "varchar", typeInfo: TIVarchar},
+			Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
 		},
 	}
 	expected.Key("Str").typeID = 1
