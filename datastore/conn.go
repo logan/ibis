@@ -18,20 +18,20 @@ type CassandraConfig struct {
 	Consistency string
 }
 
-// CassandraConn is an open connection to a Cassandra cluster associated with a particular keyspace.
-type CassandraConn struct {
+// cassandraConn is an open connection to a Cassandra cluster associated with a particular keyspace.
+type cassandraConn struct {
 	*gocql.Session                 // The underlying gocql Session, for querying the cluster.
 	Config         CassandraConfig // The settings used to establish the session.
 }
 
 // DialCassandra connects to a Cassandra cluster as specified by the given config.
-func DialCassandra(config CassandraConfig) (*CassandraConn, error) {
+func DialCassandra(config CassandraConfig) (Cluster, error) {
 	var session *gocql.Session
 	var err error
 	if session, err = makeCluster(config).CreateSession(); err != nil {
 		return nil, err
 	}
-	return &CassandraConn{Config: config, Session: session}, nil
+	return &cassandraConn{Config: config, Session: session}, nil
 }
 
 func makeCluster(config CassandraConfig) *gocql.ClusterConfig {
@@ -68,11 +68,11 @@ func parseConsistency(value string) (consistency gocql.Consistency) {
 	return
 }
 
-func (conn *CassandraConn) GetKeyspace() string {
+func (conn *cassandraConn) GetKeyspace() string {
 	return conn.Config.Keyspace
 }
 
-func (conn *CassandraConn) Query(stmts ...*CQL) Query {
+func (conn *cassandraConn) Query(stmts ...*CQL) Query {
 	if len(stmts) == 0 {
 		return nil
 	}
@@ -82,12 +82,12 @@ func (conn *CassandraConn) Query(stmts ...*CQL) Query {
 	return conn.query(stmts[0])
 }
 
-func (conn *CassandraConn) query(stmt *CQL) Query {
+func (conn *cassandraConn) query(stmt *CQL) Query {
 	compiled := stmt.compile()
 	return (*cassQuery)(conn.Session.Query(compiled.term, compiled.params...).Iter())
 }
 
-func (conn *CassandraConn) queryBatch(stmts []*CQL) Query {
+func (conn *cassandraConn) queryBatch(stmts []*CQL) Query {
 	batch := gocql.NewBatch(gocql.LoggedBatch)
 	for _, stmt := range stmts {
 		compiled := stmt.compile()

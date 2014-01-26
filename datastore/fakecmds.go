@@ -5,7 +5,7 @@ import "errors"
 import "tux21b.org/v1/gocql"
 
 type command interface {
-	Execute(*fakeKeyspace, valueList) (ResultSet, error)
+	Execute(*fakeKeyspace, valueList) (resultSet, error)
 }
 
 type createKeyspaceCommand struct {
@@ -14,7 +14,7 @@ type createKeyspaceCommand struct {
 	options    optionMap
 }
 
-func (cmd *createKeyspaceCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, error) {
+func (cmd *createKeyspaceCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
 	if _, ok := ks.Cluster.Keyspaces[cmd.identifier]; ok {
 		if cmd.strict {
 			return nil, errors.New("keyspace already exists: " + cmd.identifier)
@@ -23,7 +23,7 @@ func (cmd *createKeyspaceCommand) Execute(ks *fakeKeyspace, vals valueList) (Res
 	ks = ks.Cluster.AddKeyspace(cmd.identifier)
 	ks.Cluster.CurrentKeyspace = cmd.identifier
 	ks.Options = cmd.options
-	return ResultSet{}, nil
+	return resultSet{}, nil
 }
 
 type createTableCommand struct {
@@ -35,7 +35,7 @@ type createTableCommand struct {
 	options    optionMap
 }
 
-func (cmd *createTableCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, error) {
+func (cmd *createTableCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
 	if _, ok := ks.CFs[cmd.identifier]; ok && cmd.strict {
 		return nil, errors.New("table " + cmd.identifier + " already exists")
 	}
@@ -47,7 +47,7 @@ func (cmd *createTableCommand) Execute(ks *fakeKeyspace, vals valueList) (Result
 		Rows:        make([]MarshalledMap, 0),
 	}
 	ks.CFs[cmd.identifier] = table
-	return ResultSet{}, nil
+	return resultSet{}, nil
 }
 
 type dropCommand struct {
@@ -56,7 +56,7 @@ type dropCommand struct {
 	strict     bool
 }
 
-func (cmd *dropCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, error) {
+func (cmd *dropCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
 	switch cmd.dropType {
 	case "keyspace":
 		if _, ok := ks.Cluster.Keyspaces[cmd.identifier]; !ok {
@@ -66,7 +66,7 @@ func (cmd *dropCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, er
 		} else {
 			delete(ks.Cluster.Keyspaces, cmd.identifier)
 		}
-		return ResultSet{}, nil
+		return resultSet{}, nil
 	default:
 		return nil, errors.New("drop of " + cmd.dropType + " not implemented")
 	}
@@ -79,7 +79,7 @@ type insertCommand struct {
 	cas    bool
 }
 
-func (cmd *insertCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, error) {
+func (cmd *insertCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
 	cf, err := ks.GetCF(cmd.table)
 	if err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func (cmd *insertCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, 
 		srow.Columns = append([]string{"*applied"}, srow.Columns...)
 		srow.Row["*applied"] = (*MarshalledValue)(LiteralValue(applied))
 	}
-	return ResultSet{srow}, nil
+	return resultSet{srow}, nil
 }
 
 type selectCommand struct {
@@ -111,7 +111,7 @@ type selectCommand struct {
 	limit int
 }
 
-func (cmd *selectCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, error) {
+func (cmd *selectCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
 	cf, err := ks.GetCF(cmd.table)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ type updateCommand struct {
 	key   map[string]pval
 }
 
-func (cmd *updateCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, error) {
+func (cmd *updateCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
 	cf, err := ks.GetCF(cmd.table)
 	if err != nil {
 		return nil, err
@@ -148,7 +148,7 @@ func (cmd *updateCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, 
 	if _, _, err := cf.Set(mmap, false); err != nil {
 		return nil, err
 	}
-	return ResultSet{}, nil
+	return resultSet{}, nil
 }
 
 type alterCommand struct {
@@ -160,14 +160,14 @@ type alterCommand struct {
 	options optionMap
 }
 
-func (cmd *alterCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, error) {
+func (cmd *alterCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
 	cf, err := ks.GetCF(cmd.table)
 	if err != nil {
 		return nil, err
 	}
 	if cmd.options != nil {
 		cf.Options = cmd.options
-		return ResultSet{}, nil
+		return resultSet{}, nil
 	}
 	found := -1
 	for i, col := range cf.Columns {
@@ -185,7 +185,7 @@ func (cmd *alterCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, e
 	if cmd.add != "" {
 		cf.Columns = append(cf.Columns, cmd.add)
 		cf.ColumnTypes = append(cf.ColumnTypes, cmd.coltype)
-		return ResultSet{}, nil
+		return resultSet{}, nil
 	}
 	if found == -1 {
 		return nil, errors.New("no such cmdumn: " + cmd.alter + cmd.drop)
@@ -194,5 +194,5 @@ func (cmd *alterCommand) Execute(ks *fakeKeyspace, vals valueList) (ResultSet, e
 		cf.Columns = append(cf.Columns[:found], cf.Columns[found+1:]...)
 		cf.ColumnTypes = append(cf.ColumnTypes[:found], cf.ColumnTypes[found+1:]...)
 	}
-	return ResultSet{}, nil
+	return resultSet{}, nil
 }

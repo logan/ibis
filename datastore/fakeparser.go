@@ -27,7 +27,7 @@ func (s *statement) Compile() error {
 	return nil
 }
 
-func (s *statement) Execute(ks *fakeKeyspace, params ...interface{}) (ResultSet, error) {
+func (s *statement) Execute(ks *fakeKeyspace, params ...interface{}) (resultSet, error) {
 	bind := make(valueList, len(params))
 	for i, param := range params {
 		bind[i] = LiteralValue(param)

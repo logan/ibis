@@ -7,7 +7,7 @@ func TestGetLiveSchema(t *testing.T) {
 	tc := NewTestConn(t)
 	defer tc.Close()
 
-	schema, err := GetLiveSchema(tc.Cluster)
+	schema, err := GetLiveSchema(tc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestGetLiveSchema(t *testing.T) {
 		},
 	}
 	expected.Key("stringcol", "int64col", "boolcol")
-	schema, err = GetLiveSchema(tc.Cluster)
+	schema, err = GetLiveSchema(tc)
 	if err != nil {
 		t.Fatal(err)
 	}

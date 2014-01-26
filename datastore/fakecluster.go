@@ -37,7 +37,7 @@ type fakeCluster struct {
 	CurrentKeyspace string
 }
 
-func newFakeCluster() *fakeCluster {
+func FakeCassandra() Cluster {
 	c := &fakeCluster{Keyspaces: make(map[string]*fakeKeyspace)}
 	c.AddKeyspace("system")
 	c.CurrentKeyspace = "system"
@@ -57,7 +57,7 @@ func (c *fakeCluster) AddKeyspace(name string) *fakeKeyspace {
 }
 
 func (c *fakeCluster) Query(stmts ...*CQL) Query {
-	var results ResultSet
+	var results resultSet
 	for _, stmt := range stmts {
 		cql, params := stmt.Build()
 		parser := newStatement(cql)
@@ -146,7 +146,7 @@ func (c *fakeCluster) schemaColumns() *fakeTable {
 }
 
 type fakeQuery struct {
-	results ResultSet
+	results resultSet
 	err     error
 }
 
@@ -291,7 +291,7 @@ type order struct {
 }
 
 type sortInterface struct {
-	rows  ResultSet
+	rows  resultSet
 	order []order
 }
 
@@ -326,7 +326,7 @@ func (s sortInterface) Swap(i, j int) {
 	s.rows[j] = srow
 }
 
-func (rs ResultSet) Sort(order []order) {
+func (rs resultSet) Sort(order []order) {
 	if len(order) > 0 {
 		fmt.Println("before sort:")
 		fmt.Println(rs)
@@ -336,7 +336,7 @@ func (rs ResultSet) Sort(order []order) {
 	}
 }
 
-func (t *fakeTable) Query(cols []string, where []comparison, binds valueList) (ResultSet, error) {
+func (t *fakeTable) Query(cols []string, where []comparison, binds valueList) (resultSet, error) {
 	if len(cols) == 1 {
 		if cols[0] == "*" {
 			cols = t.Columns
@@ -345,7 +345,7 @@ func (t *fakeTable) Query(cols []string, where []comparison, binds valueList) (R
 		}
 	}
 	count := 0
-	rows := make(ResultSet, 0)
+	rows := make(resultSet, 0)
 	for _, row := range t.Rows {
 		rowOk := true
 		for _, cmp := range where {
@@ -367,19 +367,19 @@ func (t *fakeTable) Query(cols []string, where []comparison, binds valueList) (R
 		}
 	}
 	if cols == nil {
-		srow := SelectedRow{Row: make(MarshalledMap), Columns: []string{"count"}}
+		srow := selectedRow{Row: make(MarshalledMap), Columns: []string{"count"}}
 		srow.Row["count"] = (*MarshalledValue)(LiteralValue(count))
 		rows = append(rows, srow)
 	}
 	return rows, nil
 }
 
-type SelectedRow struct {
+type selectedRow struct {
 	Row     MarshalledMap
 	Columns []string
 }
 
-func (r *SelectedRow) String() string {
+func (r *selectedRow) String() string {
 	parts := make([]string, len(r.Columns))
 	for i, col := range r.Columns {
 		v, err := unmarshal(r.Row[col])
@@ -392,9 +392,9 @@ func (r *SelectedRow) String() string {
 	return strings.Join(parts, ",")
 }
 
-type ResultSet []SelectedRow
+type resultSet []selectedRow
 
-func (rs ResultSet) String() string {
+func (rs resultSet) String() string {
 	if len(rs) == 0 {
 		return "no results"
 	}
@@ -426,8 +426,8 @@ func (r *MarshalledMap) Match(key []string, values []*MarshalledValue) bool {
 	return true
 }
 
-func (r *MarshalledMap) Select(keys []string) SelectedRow {
-	srow := SelectedRow{Row: make(MarshalledMap), Columns: keys}
+func (r *MarshalledMap) Select(keys []string) selectedRow {
+	srow := selectedRow{Row: make(MarshalledMap), Columns: keys}
 	for k, v := range *r {
 		srow.Row[k] = v
 	}

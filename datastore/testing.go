@@ -52,19 +52,17 @@ func rowsEqual(row1, row2 Row) bool {
 
 func connect(config CassandraConfig) (Cluster, error) {
 	if config.Node[0] == "" {
-		return newFakeCluster(), nil
+		return FakeCassandra(), nil
 	}
 	return DialCassandra(config)
 }
 
-// A TestConn extends Cluster to manage throwaway keyspaces. This guarantees tests a pristine
-// environment before interacting with Cassandra.
-type TestConn struct {
+type testConn struct {
 	Cluster
 }
 
 // NewTestConn connects to Cassandra and establishes an empty keyspace to operate in.
-func NewTestConn(t *testing.T) *TestConn {
+func NewTestConn(t *testing.T) Cluster {
 	config := CassandraConfig{
 		Node:        strings.Split(*flagCluster, ","),
 		Keyspace:    "system",
@@ -80,7 +78,7 @@ func NewTestConn(t *testing.T) *TestConn {
 		t.Fatal(err)
 	}
 
-	return &TestConn{c}
+	return &testConn{c}
 }
 
 func initKeyspace(config CassandraConfig) error {
@@ -102,8 +100,7 @@ func initKeyspace(config CassandraConfig) error {
 	return c.Query(cql).Exec()
 }
 
-// Close drops the keyspace and closes the session.
-func (tc *TestConn) Close() {
+func (tc *testConn) Close() {
 	defer tc.Cluster.Close()
 	cql := NewCQL(fmt.Sprintf("DROP KEYSPACE %s", *flagKeyspace))
 	tc.Query(cql).Exec()
