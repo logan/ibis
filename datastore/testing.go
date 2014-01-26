@@ -15,13 +15,9 @@ var (
 
 type testSeqIDGenerator uint64
 
-func (g *testSeqIDGenerator) New() (SeqID, error) {
+func (g *testSeqIDGenerator) NewSeqID() (SeqID, error) {
 	*g++
 	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
-}
-
-func (g *testSeqIDGenerator) CurrentInterval() string {
-	return interval(SeqID(strconv.FormatUint(uint64(*g), 36)))
 }
 
 func rowsEqual(row1, row2 Row) bool {
@@ -107,8 +103,8 @@ func initKeyspace(config CassandraConfig) error {
 }
 
 // Close drops the keyspace and closes the session.
-func (tc *TestConn) Close() error {
+func (tc *TestConn) Close() {
 	defer tc.Cluster.Close()
 	cql := NewCQL(fmt.Sprintf("DROP KEYSPACE %s", *flagKeyspace))
-	return tc.Query(cql).Exec()
+	tc.Query(cql).Exec()
 }

@@ -14,8 +14,7 @@ func init() {
 type SeqID string
 
 type SeqIDGenerator interface {
-	New() (SeqID, error)
-	CurrentInterval() string
+	NewSeqID() (SeqID, error)
 }
 
 type snowflakeGenerator struct {
@@ -30,7 +29,7 @@ func NewSeqIDGenerator() (SeqIDGenerator, error) {
 	return &snowflakeGenerator{snowflake}, nil
 }
 
-func (s *snowflakeGenerator) New() (SeqID, error) {
+func (s *snowflakeGenerator) NewSeqID() (SeqID, error) {
 	// TODO: catch and retry on error
 	uid, err := s.snowflake.Next()
 	if err != nil {
@@ -38,33 +37,4 @@ func (s *snowflakeGenerator) New() (SeqID, error) {
 	}
 	// TODO: pad to 13 characters
 	return SeqID(strconv.FormatUint(uid, 36)), nil
-}
-
-func (s *snowflakeGenerator) CurrentInterval() string {
-	shift := uint64(gosnow.WorkerIdBits + gosnow.SequenceBits)
-	i := uint64(time.Now().UnixNano()/1000000-gosnow.Since) << shift
-	return interval(SeqID(strconv.FormatUint(i, 36)))
-}
-
-func interval(seqID SeqID) string {
-	// drop last 8 characters
-	s := string(seqID)
-	if len(s) <= 8 {
-		return "0"
-	}
-	return s[:len(s)-8]
-}
-
-func intervalToSeqID(interval string) SeqID {
-	return SeqID(interval + "00000000")
-}
-
-func decrInterval(interval string) string {
-	i, _ := strconv.ParseUint(interval, 36, 64)
-	return strconv.FormatUint(i-1, 36)
-}
-
-func incrInterval(interval string) string {
-	i, _ := strconv.ParseUint(interval, 36, 64)
-	return strconv.FormatUint(i+1, 36)
 }

@@ -54,10 +54,10 @@ func TestGetLiveSchema(t *testing.T) {
 }
 
 func TestDiffLiveSchema(t *testing.T) {
-	orm := NewTestOrm(t)
-	defer orm.Close()
+	cluster := NewTestConn(t)
+	defer cluster.Close()
 
-	diff, err := DiffLiveSchema(orm.TestConn.Cluster, &Schema{})
+	diff, err := DiffLiveSchema(cluster, &Schema{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,11 +75,12 @@ func TestDiffLiveSchema(t *testing.T) {
 				},
 			},
 		},
+		Cluster: cluster,
 	}
 	model.CFs["T1"].Key("A")
 
 	expected := &SchemaDiff{Creations: []*ColumnFamily{model.CFs["T1"]}}
-	diff, err = DiffLiveSchema(orm.TestConn.Cluster, model)
+	diff, err = DiffLiveSchema(cluster, model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +88,7 @@ func TestDiffLiveSchema(t *testing.T) {
 		t.Errorf("\nexpected: %s\nreceived: %s", expected, diff)
 	}
 
-	if err = diff.Apply(orm.Orm); err != nil {
+	if err = diff.Apply(cluster); err != nil {
 		t.Fatal(err)
 	}
 
@@ -108,7 +109,7 @@ func TestDiffLiveSchema(t *testing.T) {
 			},
 		},
 	}
-	diff, err = DiffLiveSchema(orm.TestConn.Cluster, model)
+	diff, err = DiffLiveSchema(cluster, model)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,10 +117,10 @@ func TestDiffLiveSchema(t *testing.T) {
 		t.Errorf("\nexpected: %s\nreceived: %s", expected, diff)
 	}
 
-	if err = diff.Apply(orm.Orm); err != nil {
+	if err = diff.Apply(cluster); err != nil {
 		t.Fatal(err)
 	}
-	diff, err = DiffLiveSchema(orm.TestConn.Cluster, &Schema{})
+	diff, err = DiffLiveSchema(cluster, &Schema{})
 	if err != nil {
 		t.Fatal(err)
 	}

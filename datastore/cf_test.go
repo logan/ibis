@@ -43,3 +43,5 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 		t.Error(msg)
 	}
 }
+
+// TODO: test create/load/exists

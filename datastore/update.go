@@ -34,9 +34,9 @@ func (d *SchemaDiff) String() string {
 }
 
 // Apply issues CQL statements to transform the former schema into the latter.
-func (d *SchemaDiff) Apply(orm *Orm) error {
+func (d *SchemaDiff) Apply(cluster Cluster) error {
 	for _, t := range d.Creations {
-		if err := orm.Query(t.CreateStatement()).Exec(); err != nil {
+		if err := cluster.Query(t.CreateStatement()).Exec(); err != nil {
 			return err
 		}
 		for _, hook := range t.onCreateHooks {
@@ -47,7 +47,7 @@ func (d *SchemaDiff) Apply(orm *Orm) error {
 	}
 	for _, a := range d.Alterations {
 		for _, s := range a.AlterStatements() {
-			if err := orm.Query(s).Exec(); err != nil {
+			if err := cluster.Query(s).Exec(); err != nil {
 				return err
 			}
 		}

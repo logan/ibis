@@ -227,8 +227,8 @@ func (s *ReflectedRow) Marshal(mmap MarshalledMap) error {
 		fieldval := value.FieldByName(col.Name)
 		if fieldval.IsValid() {
 			if seqid, ok := fieldval.Interface().(SeqID); ok && seqid == "" {
-				if cf.SeqID != nil {
-					if seqid, err = cf.SeqID.New(); err != nil {
+				if cf.SeqIDGenerator != nil {
+					if seqid, err = cf.NewSeqID(); err != nil {
 						return err
 					}
 					fieldval.Set(reflect.ValueOf(seqid))

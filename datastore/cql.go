@@ -73,7 +73,7 @@ func (cql *CQL) String() string {
 }
 
 func (cql *CQL) Query() Query {
-	return cql.cf.orm.Cluster.Query(cql)
+	return cql.cf.Cluster().Query(cql)
 }
 
 func (cql *CQL) Cols(keys ...string) *CQL {
@@ -179,4 +179,18 @@ func (parts boundPartGroup) join(prefix, conn string) (result boundPart) {
 		}
 	}
 	return
+}
+
+var placeholderListString string
+
+func init() {
+	p := make([]string, 100)
+	for i := 0; i < len(p); i++ {
+		p[i] = "?"
+	}
+	placeholderListString = strings.Join(p, ", ")
+}
+
+func placeholderList(n int) string {
+	return placeholderListString[:3*(n-1)+1]
 }

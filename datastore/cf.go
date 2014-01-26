@@ -1,10 +1,18 @@
 package datastore
 
+import "errors"
 import "fmt"
 import "reflect"
 import "strings"
 
 import "tux21b.org/v1/gocql"
+
+var (
+	ErrNotFound      = errors.New("not found")
+	ErrAlreadyExists = errors.New("already exists")
+	ErrTableNotBound = errors.New("table not connected to a cluster")
+	ErrInvalidType   = errors.New("invalid row type")
+)
 
 type OnCreateHook func(*ColumnFamily) error
 
@@ -12,12 +20,19 @@ type OnCreateHook func(*ColumnFamily) error
 type ColumnFamily struct {
 	Name       string   // The name of the column family.
 	Columns    []Column // The definition of the column family's columns.
-	SeqID      SeqIDGenerator
 	PrimaryKey []string
+	SeqIDGenerator
+	*Schema
 
-	orm           *Orm
 	onCreateHooks []OnCreateHook
 	typeID        int
+}
+
+func (cf *ColumnFamily) Cluster() Cluster {
+	if cf.Schema == nil {
+		return nil
+	}
+	return cf.Schema.Cluster
 }
 
 func (cf *ColumnFamily) Key(keys ...string) *ColumnFamily {
@@ -123,73 +138,169 @@ func goTypeToCassType(t reflect.Type) (string, bool) {
 	return result, ok
 }
 
-// Bind returns a new ColumnFamily bound to the given *Orm.
-func (t *ColumnFamily) Bind(orm *Orm) {
-	t.orm = orm
-	t.SeqID = t.orm.SeqID
-}
-
 // IsBound returns true if the table is bound to an *Orm.
-func (t *ColumnFamily) IsBound() bool {
-	return t.orm != nil
+func (cf *ColumnFamily) IsBound() bool {
+	return cf.Cluster() != nil
 }
 
 // IsValidType returns true if the given Row is registered with the column family.
-func (t *ColumnFamily) IsValidRowType(row Row) bool {
-	return t == row.GetCF()
+func (cf *ColumnFamily) IsValidRowType(row Row) bool {
+	return cf == row.GetCF()
 }
 
 // Exists returns true if a row exists in the table's column family with the given primary key.
-func (t *ColumnFamily) Exists(key ...interface{}) (bool, error) {
-	if !t.IsBound() {
+func (cf *ColumnFamily) Exists(key ...interface{}) (bool, error) {
+	if !cf.IsBound() {
 		return false, ErrTableNotBound
 	}
-	return t.orm.Exists(t, key...)
+	cql := NewSelect(cf).Cols("COUNT(*)")
+	for i, k := range cf.PrimaryKey {
+		cql.Where(k+" = ?", key[i])
+	}
+	qiter := cf.Query(cql)
+	var count int
+	if !qiter.Scan(&count) {
+		return false, qiter.Close()
+	}
+	return count > 0, nil
 }
 
 // LoadByKey loads a row from the table by primary key and stores it in the given Row.
-func (t *ColumnFamily) LoadByKey(row Row, key ...interface{}) error {
-	if !t.IsBound() {
+func (cf *ColumnFamily) LoadByKey(row Row, key ...interface{}) error {
+	if !cf.IsBound() {
 		return ErrTableNotBound
 	}
-	if !t.IsValidRowType(row) {
+
+	if !cf.IsValidRowType(row) {
 		return ErrInvalidType
 	}
-	return t.orm.LoadByKey(t, row, key...)
+
+	colnames := make([]string, len(cf.Columns))
+	for i, col := range cf.Columns {
+		colnames[i] = col.Name
+	}
+
+	cql := NewSelect(cf).Cols(colnames...)
+	for i, k := range cf.PrimaryKey {
+		cql.Where(k+" = ?", key[i])
+	}
+	qiter := cf.Query(cql)
+	mmap := make(MarshalledMap)
+	if !qiter.Scan(mmap.PointersTo(colnames...)...) {
+		return qiter.Close()
+	}
+	return row.Unmarshal(mmap)
 }
 
 // CommitCAS inserts a filled-in "row" into the table's column family. An error is returned if the
 // type of the row is not compatible with the one registered for the table, or if a row already
 // exists with the same primary key.
-func (t *ColumnFamily) CommitCAS(row Row) error {
-	if !t.IsBound() {
+func (cf *ColumnFamily) CommitCAS(row Row) error {
+	if !cf.IsBound() {
 		return ErrTableNotBound
 	}
-	if !t.IsValidRowType(row) {
+	if !cf.IsValidRowType(row) {
 		return ErrInvalidType
 	}
 	// TODO: handle pk changes
-	return t.orm.Commit(t, row, true)
+	return cf.Commit(row, true)
 }
 
-// Commit writes any modified values in a loaded "row" to the table's column family. An error is
-// returned if the type of the row is not compatible with the one registered for the table.
-func (t *ColumnFamily) Commit(row Row) error {
-	if !t.IsBound() {
-		return ErrTableNotBound
-	}
-	if !t.IsValidRowType(row) {
-		return ErrInvalidType
-	}
-	return t.orm.Commit(t, row, false)
-}
-
-func (t *ColumnFamily) PrepareCommit(row Row) ([]*CQL, error) {
-	if !t.IsBound() {
+func (cf *ColumnFamily) PrepareCommit(row Row, cas bool) ([]*CQL, error) {
+	if !cf.IsBound() {
 		return nil, ErrTableNotBound
 	}
-	if !t.IsValidRowType(row) {
+	if !cf.IsValidRowType(row) {
 		return nil, ErrInvalidType
 	}
-	return t.orm.PrepareCommit(t, row, false)
+	mmap := make(MarshalledMap)
+	if err := row.Marshal(mmap); err != nil {
+		return nil, err
+	}
+	return cf.precommit(mmap, cas)
+}
+
+func (cf *ColumnFamily) precommit(mmap MarshalledMap, cas bool) ([]*CQL, error) {
+	stmts := make([]*CQL, 0, 1)
+
+	// Generate the appropriate CQL.
+	selectedKeys := make([]string, len(cf.Columns))
+	for i, col := range cf.Columns {
+		selectedKeys[i] = col.Name
+	}
+	var cql *CQL
+	if cas {
+		cql = NewInsert(cf).Keys(selectedKeys...).Values(mmap.InterfacesFor(selectedKeys...)...)
+		cql.IfNotExists()
+	} else {
+		// For an update, it makes no sense to treat primary keys as dirty.
+		for _, k := range cf.PrimaryKey {
+			mmap[k].Dirty = false
+		}
+		selectedKeys = mmap.DirtyKeys()
+		if len(selectedKeys) > 0 {
+			cql = NewUpdate(cf)
+			for _, k := range selectedKeys {
+				cql.Set(k, mmap[k])
+			}
+			for _, k := range cf.PrimaryKey {
+				cql.Where(k+" = ?", mmap[k])
+			}
+		}
+	}
+	return append(stmts, cql), nil
+}
+
+// Commit writes any modified values in the given row to the given CF.
+func (cf *ColumnFamily) Commit(row Row, cas bool) error {
+	mmap := make(MarshalledMap)
+	if err := row.Marshal(mmap); err != nil {
+		return err
+	}
+
+	stmts, err := cf.precommit(mmap, cas)
+	if err != nil {
+		return err
+	}
+
+	// Apply all but the final statement as a batch (as these should be index updates).
+	if len(stmts) > 1 {
+		qiter := cf.Query(stmts[:len(stmts)-1]...)
+		if err = qiter.Close(); err != nil {
+			return err
+		}
+	}
+
+	// Apply the INSERT or UPDATE and check results.
+	cql := stmts[len(stmts)-1]
+	if cql == nil {
+		return nil
+	}
+	qiter := cf.Query(cql)
+	if cas {
+		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
+		// indicating success, and a row with the values that were committed. We don't need this
+		// response, but we need to supply MarshalledValue pointers for the returned columns anyway.
+		// Despite this, the values pointed to will not be filled in except in the case of error.
+		casmap := make(MarshalledMap)
+		selectedKeys := make([]string, len(cf.Columns))
+		for i, col := range cf.Columns {
+			selectedKeys[i] = col.Name
+		}
+		pointers := casmap.PointersTo(selectedKeys...)
+		if applied := qiter.ScanCAS(pointers...); !applied {
+			err := qiter.Close()
+			if err == nil {
+				err = ErrAlreadyExists
+			}
+			return err
+		}
+	} else {
+		if err := qiter.Exec(); err != nil {
+			return err
+		}
+	}
+
+	// Make the row unmarshal its given values, in case it is caching upon load.
+	return row.Unmarshal(mmap)
 }

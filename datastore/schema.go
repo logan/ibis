@@ -7,9 +7,10 @@ type Keyspace map[string]*ColumnFamily
 
 // Schema is a map of column families by name, defining a keyspace.
 type Schema struct {
-	CFs        Keyspace
-	nextTypeID int
-	orm        *Orm
+	Cluster
+	CFs           Keyspace
+	SchemaUpdates *SchemaDiff
+	nextTypeID    int
 }
 
 // NewSchema returns a new, empty schema.
@@ -23,22 +24,37 @@ func NewSchema() *Schema {
 // AddCF adds a column family definition to the schema.
 func (s *Schema) AddCF(cf *ColumnFamily) {
 	s.CFs[strings.ToLower(cf.Name)] = cf
+	cf.Schema = s
 	if cf.typeID == 0 {
 		cf.typeID = s.nextTypeID
 		s.nextTypeID++
 	}
 }
 
-// Bind returns a new schema with all CFs bound to the given *Orm.
-func (s *Schema) Bind(orm *Orm) {
-	for _, cf := range s.CFs {
-		cf.Bind(orm)
+func (s *Schema) DialCassandra(config CassandraConfig) error {
+	cluster, err := DialCassandra(config)
+	if err != nil {
+		return err
 	}
+	s.Cluster = cluster
+	s.SchemaUpdates, err = DiffLiveSchema(s.Cluster, s)
+	return err
+}
+
+// RequiresUpdates returns true if the Orm model differs from the existing column families in
+// Cassandra.
+func (s *Schema) RequiresUpdates() bool {
+	return s.SchemaUpdates.Size() > 0
+}
+
+// ApplySchemaUpdates applies any required modifications to the live schema to match the Orm model.
+func (s *Schema) ApplySchemaUpdates() error {
+	return s.SchemaUpdates.Apply(s.Cluster)
 }
 
 // IsBound returns true if the schema is bound to an *Orm.
 func (s *Schema) IsBound() bool {
-	return s.orm != nil
+	return s.Cluster != nil
 }
 
 type ReflectableColumnFamily interface {

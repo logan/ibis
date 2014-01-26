@@ -92,7 +92,7 @@ func TestReflectedRowMarshalAndUnmarshal(t *testing.T) {
 			Column{Name: "Time", typeInfo: TITimestamp},
 			Column{Name: "SeqID", typeInfo: TIVarchar},
 		},
-		SeqID: &seqidgen,
+		SeqIDGenerator: &seqidgen,
 	}
 	r.Reflect(&r)
 
