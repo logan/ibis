@@ -1,4 +1,4 @@
-package datastore
+package ibis
 
 import "reflect"
 import "strings"
