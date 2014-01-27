@@ -67,18 +67,19 @@ func (cf *ColumnFamily) OnCreate(hook OnCreateHook) *ColumnFamily {
 }
 
 // CreateStatement returns the CQL statement that would create this table.
-func (t *ColumnFamily) CreateStatement() *CQL {
-	cols := make([]string, len(t.Columns))
-	for i, col := range t.Columns {
-		cols[i] = fmt.Sprintf("%s %s", col.Name, col.Type)
+func (t *ColumnFamily) CreateStatement() CQL {
+	var b CQLBuilder
+	b.Append("CREATE TABLE " + t.Name + " (")
+	for _, col := range t.Columns {
+		b.Append(col.Name + " " + col.Type + ", ")
 	}
-	var options string
+	b.Append("PRIMARY KEY (" + strings.Join(t.PrimaryKey, ", ") + "))")
 	if t.typeID != 0 {
-		options = fmt.Sprintf(" WITH comment='%d'", t.typeID)
+		b.Append(fmt.Sprintf(" WITH comment='%d'", t.typeID))
 	}
-	stmt := fmt.Sprintf("CREATE TABLE %s (%s, PRIMARY KEY (%s))%s",
-		t.Name, strings.Join(cols, ", "), strings.Join(t.PrimaryKey, ", "), options)
-	return NewCQL(stmt)
+	cql := b.CQL()
+	cql.Cluster(t.Cluster())
+	return cql
 }
 
 // A Column gives the name and data type of a Cassandra column. The value of type should be a CQL
@@ -153,11 +154,11 @@ func (cf *ColumnFamily) Exists(key ...interface{}) (bool, error) {
 	if !cf.IsBound() {
 		return false, ErrTableNotBound
 	}
-	cql := NewSelect(cf).Cols("COUNT(*)")
+	sel := Select("COUNT(*)").From(cf)
 	for i, k := range cf.PrimaryKey {
-		cql.Where(k+" = ?", key[i])
+		sel.Where(k+" = ?", key[i])
 	}
-	qiter := cf.Query(cql)
+	qiter := sel.CQL().Query()
 	var count int
 	if !qiter.Scan(&count) {
 		return false, qiter.Close()
@@ -180,11 +181,11 @@ func (cf *ColumnFamily) LoadByKey(row Row, key ...interface{}) error {
 		colnames[i] = col.Name
 	}
 
-	cql := NewSelect(cf).Cols(colnames...)
+	sel := Select(colnames...).From(cf)
 	for i, k := range cf.PrimaryKey {
-		cql.Where(k+" = ?", key[i])
+		sel.Where(k+" = ?", key[i])
 	}
-	qiter := cf.Query(cql)
+	qiter := sel.CQL().Query()
 	mmap := make(MarshalledMap)
 	if !qiter.Scan(mmap.PointersTo(colnames...)...) {
 		return qiter.Close()
@@ -206,7 +207,7 @@ func (cf *ColumnFamily) CommitCAS(row Row) error {
 	return cf.Commit(row, true)
 }
 
-func (cf *ColumnFamily) PrepareCommit(row Row, cas bool) ([]*CQL, error) {
+func (cf *ColumnFamily) PrepareCommit(row Row, cas bool) ([]CQL, error) {
 	if !cf.IsBound() {
 		return nil, ErrTableNotBound
 	}
@@ -220,18 +221,21 @@ func (cf *ColumnFamily) PrepareCommit(row Row, cas bool) ([]*CQL, error) {
 	return cf.precommit(mmap, cas)
 }
 
-func (cf *ColumnFamily) precommit(mmap MarshalledMap, cas bool) ([]*CQL, error) {
-	stmts := make([]*CQL, 0, 1)
+func (cf *ColumnFamily) precommit(mmap MarshalledMap, cas bool) ([]CQL, error) {
+	stmts := make([]CQL, 0, 1)
 
 	// Generate the appropriate CQL.
 	selectedKeys := make([]string, len(cf.Columns))
 	for i, col := range cf.Columns {
 		selectedKeys[i] = col.Name
 	}
-	var cql *CQL
+	var cql CQL
 	if cas {
-		cql = NewInsert(cf).Keys(selectedKeys...).Values(mmap.InterfacesFor(selectedKeys...)...)
-		cql.IfNotExists()
+		ins := InsertInto(cf).
+			Keys(selectedKeys...).
+			Values(mmap.InterfacesFor(selectedKeys...)...).
+			IfNotExists()
+		cql = ins.CQL()
 	} else {
 		// For an update, it makes no sense to treat primary keys as dirty.
 		for _, k := range cf.PrimaryKey {
@@ -239,13 +243,14 @@ func (cf *ColumnFamily) precommit(mmap MarshalledMap, cas bool) ([]*CQL, error) 
 		}
 		selectedKeys = mmap.DirtyKeys()
 		if len(selectedKeys) > 0 {
-			cql = NewUpdate(cf)
+			upd := Update(cf)
 			for _, k := range selectedKeys {
-				cql.Set(k, mmap[k])
+				upd.Set(k, mmap[k])
 			}
 			for _, k := range cf.PrimaryKey {
-				cql.Where(k+" = ?", mmap[k])
+				upd.Where(k+" = ?", mmap[k])
 			}
+			cql = upd.CQL()
 		}
 	}
 	return append(stmts, cql), nil
@@ -258,6 +263,7 @@ func (cf *ColumnFamily) Commit(row Row, cas bool) error {
 		return err
 	}
 
+	// TODO: make the separation between precommit and commit stronger
 	stmts, err := cf.precommit(mmap, cas)
 	if err != nil {
 		return err
@@ -273,10 +279,7 @@ func (cf *ColumnFamily) Commit(row Row, cas bool) error {
 
 	// Apply the INSERT or UPDATE and check results.
 	cql := stmts[len(stmts)-1]
-	if cql == nil {
-		return nil
-	}
-	qiter := cf.Query(cql)
+	qiter := cql.Query()
 	if cas {
 		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
 		// indicating success, and a row with the values that were committed. We don't need this

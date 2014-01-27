@@ -1,7 +1,6 @@
 package ibis
 
 import "encoding/json"
-import "fmt"
 import "strconv"
 import "strings"
 
@@ -36,7 +35,9 @@ func (d *SchemaDiff) String() string {
 // Apply issues CQL statements to transform the former schema into the latter.
 func (d *SchemaDiff) Apply(cluster Cluster) error {
 	for _, t := range d.Creations {
-		if err := cluster.Query(t.CreateStatement()).Exec(); err != nil {
+		cql := t.CreateStatement()
+		cql.Cluster(cluster)
+		if err := cql.Query().Exec(); err != nil {
 			return err
 		}
 		for _, hook := range t.onCreateHooks {
@@ -47,7 +48,8 @@ func (d *SchemaDiff) Apply(cluster Cluster) error {
 	}
 	for _, a := range d.Alterations {
 		for _, s := range a.AlterStatements() {
-			if err := cluster.Query(s).Exec(); err != nil {
+			s.Cluster(cluster)
+			if err := s.Query().Exec(); err != nil {
 				return err
 			}
 		}
@@ -68,16 +70,19 @@ func (a TableAlteration) Size() int {
 }
 
 // AlterStatements generates a list of CQL statements, one for each new or altered column.
-func (a TableAlteration) AlterStatements() []*CQL {
-	alts := make([]*CQL, 0, a.Size())
+func (a TableAlteration) AlterStatements() []CQL {
+	alts := make([]CQL, 0, a.Size())
 	for _, col := range a.NewColumns {
-		cql := NewCQL(fmt.Sprintf("ALTER TABLE %s ADD %s %s", a.TableName, col.Name, col.Type))
-		alts = append(alts, cql)
+		var b CQLBuilder
+		b.Append("ALTER TABLE ").Append(a.TableName).
+			Append(" ADD ").Append(col.Name + " " + col.Type)
+		alts = append(alts, b.CQL())
 	}
 	for _, col := range a.AlteredColumns {
-		cql := NewCQL(fmt.Sprintf("ALTER TABLE %s ALTER %s TYPE %s",
-			a.TableName, col.Name, col.Type))
-		alts = append(alts, cql)
+		var b CQLBuilder
+		b.Append("ALTER TABLE ").Append(a.TableName).
+			Append(" ALTER ").Append(col.Name).Append(" TYPE ").Append(col.Type)
+		alts = append(alts, b.CQL())
 	}
 	return alts
 }
@@ -98,10 +103,11 @@ func GetLiveSchema(c Cluster) (*Schema, error) {
 		schema.CFs[strings.ToLower(t.Name)] = t
 	}
 	cf := &ColumnFamily{Name: "system.schema_columns"}
-	cql := NewSelect(cf)
-	cql.Cols("columnfamily_name", "column_name", "validator")
-	cql.Where("keyspace_name = ?", c.GetKeyspace())
-	qiter := c.Query(cql)
+	sel := Select("columnfamily_name", "column_name", "validator").
+		From(cf).Where("keyspace_name = ?", c.GetKeyspace())
+	cql := sel.CQL()
+	cql.Cluster(c)
+	qiter := cql.Query()
 	var cf_name, col_name, validator string
 	for qiter.Scan(&cf_name, &col_name, &validator) {
 		col := Column{Name: col_name, Type: typeFromValidator(validator)}
@@ -119,10 +125,11 @@ func GetLiveSchema(c Cluster) (*Schema, error) {
 
 func getLiveColumnFamilies(cluster Cluster, keyspace string) ([]*ColumnFamily, int, error) {
 	cf := &ColumnFamily{Name: "system.schema_columnfamilies"}
-	cql := NewSelect(cf)
-	cql.Cols("columnfamily_name", "key_aliases", "column_aliases", "comment")
-	cql.Where("keyspace_name = ?", keyspace)
-	qiter := cluster.Query(cql)
+	sel := Select("columnfamily_name", "key_aliases", "column_aliases", "comment").
+		From(cf).Where("keyspace_name = ?", keyspace)
+	cql := sel.CQL()
+	cql.Cluster(cluster)
+	qiter := cql.Query()
 	tables := make([]*ColumnFamily, 0, 32)
 	var cf_name, key_aliases, column_aliases, comment string
 	maxTypeID := 0

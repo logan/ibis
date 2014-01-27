@@ -15,17 +15,18 @@ func TestGetLiveSchema(t *testing.T) {
 		t.Fatalf("expected empty keyspace")
 	}
 
-	q := tc.Query(NewCQL(`
-        CREATE TABLE test (
-            blobcol blob,
-            boolcol boolean,
-            float64col double,
-            int64col bigint,
-            stringcol varchar,
-            timecol timestamp,
-            PRIMARY KEY (stringcol, int64col, boolcol)
-        )`))
-	if err = q.Exec(); err != nil {
+	var b CQLBuilder
+	b.Append("CREATE TABLE test (").
+		Append("blobcol blob, ").
+		Append("boolcol boolean, ").
+		Append("float64col double, ").
+		Append("int64col bigint, ").
+		Append("stringcol varchar, ").
+		Append("timecol timestamp, ").
+		Append("PRIMARY KEY (stringcol, int64col, boolcol))")
+	cql := b.CQL()
+	cql.Cluster(tc)
+	if err = cql.Query().Exec(); err != nil {
 		t.Fatal(err)
 	}
 

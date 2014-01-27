@@ -2,7 +2,7 @@ package ibis
 
 type Cluster interface {
 	GetKeyspace() string
-	Query(...*CQL) Query
+	Query(...CQL) Query
 	Close()
 }
 

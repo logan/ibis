@@ -21,13 +21,22 @@ func (s *statement) Compile() error {
 	stmt := &pStmt{text: s.text}
 	t := pStatement(pToken{stmt: stmt, runes: []rune(s.text)})
 	if t.err != nil {
-		return t.err
+		o := t.offset
+		pad := make([]byte, o)
+		for i := 0; i < o; i++ {
+			pad[i] = 32
+		}
+		return errors.New(fmt.Sprintf("%s\n%s\n%s^\n", t.err, s.text, string(pad)))
 	}
 	s.cmd = t.ctx.(command)
 	return nil
 }
 
 func (s *statement) Execute(ks *fakeKeyspace, params ...interface{}) (resultSet, error) {
+	fmt.Println(s.text)
+	for _, p := range params {
+		fmt.Printf("  <-- %+v\n", p)
+	}
 	bind := make(valueList, len(params))
 	for i, param := range params {
 		bind[i] = LiteralValue(param)

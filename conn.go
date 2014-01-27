@@ -72,7 +72,7 @@ func (conn *cassandraConn) GetKeyspace() string {
 	return conn.Config.Keyspace
 }
 
-func (conn *cassandraConn) Query(stmts ...*CQL) Query {
+func (conn *cassandraConn) Query(stmts ...CQL) Query {
 	if len(stmts) == 0 {
 		return nil
 	}
@@ -82,16 +82,14 @@ func (conn *cassandraConn) Query(stmts ...*CQL) Query {
 	return conn.query(stmts[0])
 }
 
-func (conn *cassandraConn) query(stmt *CQL) Query {
-	compiled := stmt.compile()
-	return (*cassQuery)(conn.Session.Query(compiled.term, compiled.params...).Iter())
+func (conn *cassandraConn) query(stmt CQL) Query {
+	return (*cassQuery)(conn.Session.Query(string(stmt.PreparedCQL), stmt.params...).Iter())
 }
 
-func (conn *cassandraConn) queryBatch(stmts []*CQL) Query {
+func (conn *cassandraConn) queryBatch(stmts []CQL) Query {
 	batch := gocql.NewBatch(gocql.LoggedBatch)
 	for _, stmt := range stmts {
-		compiled := stmt.compile()
-		batch.Query(compiled.term, compiled.params...)
+		batch.Query(string(stmt.PreparedCQL), stmt.params...)
 	}
 	return &cassBatchQuery{conn.Session.ExecuteBatch(batch)}
 }

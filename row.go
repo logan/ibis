@@ -113,6 +113,15 @@ func (rv *MarshalledMap) DirtyKeys() []string {
 }
 
 func (v *MarshalledValue) Cmp(w *MarshalledValue) (int, error) {
+	if v == nil {
+		if w == nil {
+			return 0, nil
+		} else {
+			return -1, nil
+		}
+	} else if w == nil {
+		return 1, nil
+	}
 	if v.TypeInfo != w.TypeInfo {
 		return 0, errors.New("different types are not comparable")
 	}

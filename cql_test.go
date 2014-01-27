@@ -4,9 +4,8 @@ import "fmt"
 import "testing"
 
 func TestCQL(t *testing.T) {
-	expect := func(exp string, sel *CQL) (string, bool) {
-		rcv := sel.String()
-		return fmt.Sprintf("\nexpected: '%s'\nreceived: '%s'", exp, rcv), exp == rcv
+	expect := func(exp string, sel CQL) (string, bool) {
+		return fmt.Sprintf("\nexpected: '%s'\nreceived: '%s'", exp, sel), exp == sel.String()
 	}
 
 	cf := &ColumnFamily{
@@ -17,10 +16,10 @@ func TestCQL(t *testing.T) {
 			Column{Name: "Z"},
 		},
 	}
-	if msg, ok := expect("SELECT X, Y, Z FROM Table", NewSelect(cf)); !ok {
+	if msg, ok := expect("SELECT X, Y, Z FROM Table", Select().From(cf).CQL()); !ok {
 		t.Errorf(msg)
 	}
-	if msg, ok := expect("SELECT X, Y, Z FROM Table", NewSelect(cf).Cols("*")); !ok {
+	if msg, ok := expect("SELECT X, Y, Z FROM Table", Select("*").From(cf).CQL()); !ok {
 		t.Errorf(msg)
 	}
 }

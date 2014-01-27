@@ -2,7 +2,6 @@ package ibis
 
 import "bytes"
 import "flag"
-import "fmt"
 import "reflect"
 import "strconv"
 import "strings"
@@ -88,20 +87,26 @@ func initKeyspace(config CassandraConfig) error {
 	}
 	defer c.Close()
 
-	cql := NewCQL(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", *flagKeyspace))
-	qiter := c.Query(cql)
+	var b CQLBuilder
+	cql := b.Append("DROP KEYSPACE IF EXISTS ").Append(*flagKeyspace).CQL()
+	cql.Cluster(c)
+	qiter := cql.Query()
 	if err := qiter.Exec(); err != nil {
 		return err
 	}
 
-	cql = NewCQL(fmt.Sprintf("CREATE KEYSPACE %s WITH REPLICATION"+
-		" = {'class': 'SimpleStrategy', 'replication_factor': 1}",
-		*flagKeyspace))
-	return c.Query(cql).Exec()
+	b.Clear()
+	b.Append("CREATE KEYSPACE ").Append(*flagKeyspace)
+	b.Append(" WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}")
+	cql = b.CQL()
+	cql.Cluster(c)
+	return cql.Query().Exec()
 }
 
 func (tc *testConn) Close() {
 	defer tc.Cluster.Close()
-	cql := NewCQL(fmt.Sprintf("DROP KEYSPACE %s", *flagKeyspace))
-	tc.Query(cql).Exec()
+	var b CQLBuilder
+	cql := b.Append("DROP KEYSPACE ").Append(*flagKeyspace).CQL()
+	cql.Cluster(tc)
+	cql.Query().Exec()
 }

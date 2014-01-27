@@ -56,11 +56,10 @@ func (c *fakeCluster) AddKeyspace(name string) *fakeKeyspace {
 	return ks
 }
 
-func (c *fakeCluster) Query(stmts ...*CQL) Query {
+func (c *fakeCluster) Query(stmts ...CQL) Query {
 	var results resultSet
 	for _, stmt := range stmts {
-		cql, params := stmt.Build()
-		parser := newStatement(cql)
+		parser := newStatement(string(stmt.PreparedCQL))
 		if err := parser.Compile(); err != nil {
 			return &fakeQuery{err: err}
 		}
@@ -69,7 +68,7 @@ func (c *fakeCluster) Query(stmts ...*CQL) Query {
 			c.Keyspaces[c.CurrentKeyspace] = new(fakeKeyspace)
 		}
 		var err error
-		results, err = parser.Execute(c.Keyspaces[c.CurrentKeyspace], params...)
+		results, err = parser.Execute(c.Keyspaces[c.CurrentKeyspace], stmt.params...)
 		if err != nil {
 			return &fakeQuery{err: err}
 		}

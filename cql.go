@@ -3,184 +3,6 @@ package ibis
 import "fmt"
 import "strings"
 
-type CQL struct {
-	cf      *ColumnFamily
-	cmd     string
-	cols    []string
-	where   boundPartGroup
-	orderBy boundPartGroup
-	keys    []string
-	vals    []interface{}
-	set     boundPartGroup
-	limit   int
-	cas     bool
-	raw     boundPart
-}
-
-func (cql *CQL) Build() (string, []interface{}) {
-	bp := cql.compile()
-	return bp.term, bp.params
-}
-
-func (cql *CQL) compile() boundPart {
-	switch cql.cmd {
-	case "":
-		return cql.raw
-	case "SELECT":
-		where := cql.where.join("WHERE", " AND ")
-		orderBy := cql.orderBy.join("ORDER BY", ", ")
-		if cql.cols == nil || len(cql.cols) == 0 {
-			cql.cols = make([]string, 0, len(cql.cf.Columns))
-			for _, col := range cql.cf.Columns {
-				cql.cols = append(cql.cols, col.Name)
-			}
-		}
-		var limit boundPart
-		if cql.limit > 0 {
-			limit.term = fmt.Sprintf("LIMIT %d", cql.limit)
-		}
-		prefix := boundPart{
-			fmt.Sprintf("%s FROM %s", strings.Join(cql.cols, ", "), cql.cf.Name),
-			nil,
-		}
-		return boundPartGroup{prefix, where, orderBy, limit}.join(cql.cmd, " ")
-	case "INSERT":
-		var ifne string
-		if cql.cas {
-			ifne = " IF NOT EXISTS"
-		}
-		return boundPart{
-			fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)%s", cql.cf.Name,
-				strings.Join(cql.keys, ", "), placeholderList(len(cql.keys)), ifne),
-			cql.vals,
-		}
-	case "UPDATE":
-		prefix := boundPart{cql.cf.Name, nil}
-		set := cql.set.join("SET", ", ")
-		where := cql.where.join("WHERE", " AND ")
-		return boundPartGroup{prefix, set, where}.join(cql.cmd, " ")
-	case "DELETE":
-		prefix := boundPart{"FROM " + cql.cf.Name, nil}
-		where := cql.where.join("WHERE", " AND ")
-		return boundPartGroup{prefix, where}.join(cql.cmd, " ")
-	}
-	return boundPart{}
-}
-
-func (cql *CQL) String() string {
-	compiled := cql.compile()
-	return compiled.term
-}
-
-func (cql *CQL) Query() Query {
-	return cql.cf.Cluster().Query(cql)
-}
-
-func (cql *CQL) Cols(keys ...string) *CQL {
-	if len(keys) == 1 && keys[0] == "*" {
-		cql.cols = nil
-	} else {
-		if cql.cols == nil {
-			cql.cols = make([]string, 0, len(keys))
-		}
-		cql.cols = append(cql.cols, keys...)
-	}
-	return cql
-}
-
-func (cql *CQL) Where(term string, params ...interface{}) *CQL {
-	if cql.where == nil {
-		cql.where = make(boundPartGroup, 0, 2)
-	}
-	cql.where = append(cql.where, boundPart{term, params})
-	return cql
-}
-
-func (cql *CQL) OrderBy(term string) *CQL {
-	if cql.orderBy == nil {
-		cql.orderBy = make(boundPartGroup, 0, 1)
-	}
-	cql.orderBy = append(cql.orderBy, boundPart{term, nil})
-	return cql
-}
-
-func (cql *CQL) Keys(keys ...string) *CQL {
-	cql.keys = keys
-	return cql
-}
-
-func (cql *CQL) Values(values ...interface{}) *CQL {
-	cql.vals = values
-	return cql
-}
-
-func (cql *CQL) IfNotExists() *CQL {
-	cql.cas = true
-	return cql
-}
-
-func (cql *CQL) Set(key string, value interface{}) *CQL {
-	if cql.set == nil {
-		cql.set = make(boundPartGroup, 0, len(cql.cf.Columns))
-	}
-	cql.set = append(cql.set, boundPart{key + " = ?", []interface{}{value}})
-	return cql
-}
-
-func (cql *CQL) Limit(limit int) *CQL {
-	cql.limit = limit
-	return cql
-}
-
-func NewCQL(stmt string, params ...interface{}) *CQL {
-	return &CQL{cmd: "", raw: boundPart{stmt, params}}
-}
-
-func NewSelect(cf *ColumnFamily) *CQL {
-	return &CQL{cf: cf, cmd: "SELECT"}
-}
-
-func NewInsert(cf *ColumnFamily) *CQL {
-	return &CQL{cf: cf, cmd: "INSERT"}
-}
-
-func NewUpdate(cf *ColumnFamily) *CQL {
-	return &CQL{cf: cf, cmd: "UPDATE"}
-}
-
-func NewDelete(cf *ColumnFamily) *CQL {
-	return &CQL{cf: cf, cmd: "DELETE"}
-}
-
-type boundPart struct {
-	term   string
-	params []interface{}
-}
-
-type boundPartGroup []boundPart
-
-func (parts boundPartGroup) join(prefix, conn string) (result boundPart) {
-	if len(parts) == 0 {
-		return
-	}
-	terms := make([]string, len(parts))
-	np := 0
-	for i, p := range parts {
-		terms[i] = p.term
-		if p.params != nil {
-			np += len(p.params)
-		}
-	}
-	result.term = strings.TrimSpace(prefix + " " + strings.Join(terms, conn))
-	result.params = make([]interface{}, 0, np)
-	for _, p := range parts {
-		if p.params != nil {
-			result.params = append(result.params, p.params...)
-		}
-	}
-	return
-}
-
 var placeholderListString string
 
 func init() {
@@ -193,4 +15,229 @@ func init() {
 
 func placeholderList(n int) string {
 	return placeholderListString[:3*(n-1)+1]
+}
+
+type PreparedCQL string
+
+func (pcql PreparedCQL) Bind(params ...interface{}) CQL {
+	return CQL{PreparedCQL: pcql, params: params}
+}
+
+type CQL struct {
+	PreparedCQL
+	params  []interface{}
+	cluster Cluster
+}
+
+func (cql CQL) String() string {
+	return string(cql.PreparedCQL)
+}
+
+func (cql *CQL) Cluster(cluster Cluster) {
+	cql.cluster = cluster
+}
+
+func (cql CQL) Query() Query {
+	return cql.cluster.Query(cql)
+}
+
+type CQLBuilder []CQL
+
+func (b CQLBuilder) join(prefix, conn string) (result CQL) {
+	if len(b) == 0 {
+		return
+	}
+	terms := make([]string, len(b))
+	np := 0
+	for i, p := range b {
+		terms[i] = string(p.PreparedCQL)
+		if p.params != nil {
+			np += len(p.params)
+		}
+	}
+	result.PreparedCQL = PreparedCQL(prefix + strings.Join(terms, conn))
+	result.params = make([]interface{}, 0, np)
+	for _, p := range b {
+		if p.params != nil {
+			result.params = append(result.params, p.params...)
+		}
+	}
+	return
+}
+
+func (b CQLBuilder) CQL() CQL {
+	return b.join("", "")
+}
+
+func (b *CQLBuilder) Clear() *CQLBuilder {
+	*b = make(CQLBuilder, 0)
+	return b
+}
+
+func (b *CQLBuilder) Append(term string, params ...interface{}) *CQLBuilder {
+	if *b == nil {
+		*b = make(CQLBuilder, 0)
+	}
+	*b = append(*b, CQL{PreparedCQL: PreparedCQL(term), params: params})
+	return b
+}
+
+func (b *CQLBuilder) AppendCQL(cql CQL) *CQLBuilder {
+	return b.Append(string(cql.PreparedCQL), cql.params...)
+}
+
+type SelectBuilder struct {
+	cf      *ColumnFamily
+	cols    []string
+	where   CQLBuilder
+	orderBy CQLBuilder
+	limit   int
+}
+
+func Select(keys ...string) *SelectBuilder {
+	sel := &SelectBuilder{cols: keys}
+	if len(keys) == 0 || (len(keys) == 1 && keys[0] == "*") {
+		sel.cols = nil
+	}
+	return sel
+}
+
+func (sel *SelectBuilder) From(cf *ColumnFamily) *SelectBuilder {
+	sel.cf = cf
+	return sel
+}
+
+func (sel *SelectBuilder) Where(term string, params ...interface{}) *SelectBuilder {
+	sel.where.Append(term, params...)
+	return sel
+}
+
+func (sel *SelectBuilder) OrderBy(term string) *SelectBuilder {
+	sel.orderBy.Append(term)
+	return sel
+}
+
+func (sel *SelectBuilder) Limit(limit int) *SelectBuilder {
+	sel.limit = limit
+	return sel
+}
+
+func (sel *SelectBuilder) CQL() CQL {
+	var b CQLBuilder
+	b.Append("SELECT ")
+	cols := sel.cols
+	if cols == nil || (len(cols) == 1 && cols[0] == "*") {
+		cols = make([]string, len(sel.cf.Columns))
+		for i, col := range sel.cf.Columns {
+			cols[i] = col.Name
+		}
+	}
+	b.Append(strings.Join(cols, ", "))
+	b.Append(" FROM ")
+	b.Append(sel.cf.Name)
+	if sel.where != nil {
+		b.AppendCQL(sel.where.join(" WHERE ", " AND "))
+	}
+	if sel.orderBy != nil {
+		b.AppendCQL(sel.orderBy.join(" ORDER BY ", ", "))
+	}
+	if sel.limit != 0 {
+		b.Append(fmt.Sprintf(" LIMIT %d", sel.limit))
+	}
+	cql := b.CQL()
+	cql.Cluster(sel.cf.Cluster())
+	return cql
+}
+
+type InsertBuilder struct {
+	cf     *ColumnFamily
+	keys   []string
+	values []interface{}
+	cas    bool
+}
+
+func InsertInto(cf *ColumnFamily) *InsertBuilder {
+	return &InsertBuilder{cf: cf, keys: make([]string, 0), values: make([]interface{}, 0)}
+}
+
+func (ins *InsertBuilder) Keys(keys ...string) *InsertBuilder {
+	ins.keys = append(ins.keys, keys...)
+	return ins
+}
+
+func (ins *InsertBuilder) Values(values ...interface{}) *InsertBuilder {
+	ins.values = append(ins.values, values)
+	return ins
+}
+
+func (ins *InsertBuilder) IfNotExists() *InsertBuilder {
+	ins.cas = true
+	return ins
+}
+
+func (ins *InsertBuilder) CQL() CQL {
+	var b CQLBuilder
+	b.Append("INSERT INTO ")
+	b.Append(ins.cf.Name)
+	b.Append(" (")
+	b.Append(strings.Join(ins.keys, ", "))
+	b.Append(") VALUES (")
+	b.Append(placeholderList(len(ins.values)), ins.values...)
+	b.Append(")")
+	if ins.cas {
+		b.Append(" IF NOT EXISTS")
+	}
+	cql := b.CQL()
+	cql.Cluster(ins.cf.Cluster())
+	return cql
+}
+
+type UpdateBuilder struct {
+	cf    *ColumnFamily
+	set   CQLBuilder
+	where CQLBuilder
+}
+
+func Update(cf *ColumnFamily) *UpdateBuilder {
+	return &UpdateBuilder{cf: cf, set: make(CQLBuilder, 0), where: make(CQLBuilder, 0)}
+}
+
+func (upd *UpdateBuilder) Set(key string, value interface{}) *UpdateBuilder {
+	upd.set.Append(key+" = ?", value)
+	return upd
+}
+
+func (upd *UpdateBuilder) Where(term string, params ...interface{}) *UpdateBuilder {
+	upd.where.Append(term, params...)
+	return upd
+}
+
+func (upd *UpdateBuilder) CQL() CQL {
+	var b CQLBuilder
+	b.Append("UPDATE " + upd.cf.Name)
+	b.AppendCQL(upd.set.join(" SET ", ", "))
+	b.AppendCQL(upd.where.join(" WHERE ", " AND "))
+	cql := b.CQL()
+	cql.Cluster(upd.cf.Cluster())
+	return cql
+}
+
+type DeleteBuilder struct {
+	cf    *ColumnFamily
+	where CQLBuilder
+}
+
+func DeleteFrom(cf *ColumnFamily) *DeleteBuilder {
+	return &DeleteBuilder{cf: cf, where: make(CQLBuilder, 0)}
+}
+
+func (del *DeleteBuilder) Where(term string, params ...interface{}) *DeleteBuilder {
+	del.where.Append(term, params...)
+	return del
+}
+
+func (del *DeleteBuilder) CQL() CQL {
+	cql := del.where.join("DELETE FROM "+del.cf.Name+" WHERE ", " AND ")
+	cql.Cluster(del.cf.Cluster())
+	return cql
 }
