@@ -16,7 +16,7 @@ var columnTypeMap = map[string]string{
 	"[]byte":  "blob",
 	"bool":    "boolean",
 	"float64": "double",
-	"github.com/logan/creative/datastore.SeqID": "varchar",
+	"github.com/logan/ibis.SeqID": "varchar",
 	"int64":     "bigint",
 	"string":    "varchar",
 	"time.Time": "timestamp",
