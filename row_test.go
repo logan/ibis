@@ -74,35 +74,37 @@ func TestMarshalledMapDirtyKeys(t *testing.T) {
 	}
 }
 
-func TestReflectedRowMarshalAndUnmarshal(t *testing.T) {
-	type R struct {
-		ReflectedRow
-		Str   string
-		Int   int64
-		Time  time.Time
-		SeqID SeqID
-	}
+type marshalTestRow struct {
+	Str   string
+	Int   int64
+	Time  time.Time
+	SeqID SeqID
+}
 
-	seqidgen := testSeqIDGenerator(36 * 36 * 36) // "1000" in base-36
-	var r R
-	r.CF = &ColumnFamily{
-		Columns: []Column{
-			Column{Name: "Str", typeInfo: TIVarchar},
-			Column{Name: "Int", typeInfo: TIBigInt},
-			Column{Name: "Time", typeInfo: TITimestamp},
-			Column{Name: "SeqID", typeInfo: TIVarchar},
-		},
-		SeqIDGenerator: &seqidgen,
-	}
-	r.Reflect(&r)
+type marshalTestTable ColumnFamily
+
+func (t *marshalTestTable) ConfigureCF(cf *ColumnFamily) {
+	cf.Reflect(marshalTestRow{})
+}
+
+func TestReflectedMarshalAndUnmarshal(t *testing.T) {
+	model := struct{ T *marshalTestTable }{}
+	ReflectSchemaFrom(&model)
+	cf := (*ColumnFamily)(model.T)
+	g := testSeqIDGenerator(36 * 36 * 36) // "1000" in base-36
+	cf.SeqIDGenerator = &g
+
+	var r marshalTestRow
 
 	check := func() (string, bool) {
-		var s R
-		s.CF = r.CF
-		s.Reflect(&s)
-		mmap := make(MarshalledMap)
-		r.Marshal(mmap)
-		s.Unmarshal(mmap)
+		mmap, err := cf.marshal(&r)
+		if err != nil {
+			return fmt.Sprintf("unexpected error: %v", err), false
+		}
+		var s marshalTestRow
+		if err = cf.unmarshal(&s, mmap); err != nil {
+			return fmt.Sprintf("unexpected error: %v", err), false
+		}
 		if r.Str != s.Str || r.Int != s.Int || r.Time != s.Time || r.SeqID != s.SeqID {
 			return fmt.Sprintf("\nexpected: %+v\nreceived: %+v", r, s), false
 		}

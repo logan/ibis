@@ -4,7 +4,6 @@ import "reflect"
 import "testing"
 
 type row struct {
-	ReflectedRow
 	Str string
 	Int int64
 }
@@ -13,12 +12,7 @@ type table ColumnFamily
 
 func (t *table) ConfigureCF(cf *ColumnFamily) {
 	cf.Key("Str")
-}
-
-func (t *table) NewRow() Row {
-	row := &row{}
-	row.CF = (*ColumnFamily)(t)
-	return row
+	cf.Reflect(row{})
 }
 
 func TestReflectSchemaFrom(t *testing.T) {
@@ -34,7 +28,7 @@ func TestReflectSchemaFrom(t *testing.T) {
 			Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
 		},
 	}
-	expected.Key("Str").typeID = 1
+	expected.Key("Str").Reflect(row{}).typeID = 1
 
 	schema := ReflectSchemaFrom(&model{})
 	if !reflect.DeepEqual(expected.Columns, schema.CFs["t"].Columns) {

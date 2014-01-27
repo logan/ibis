@@ -59,7 +59,6 @@ func (s *Schema) IsBound() bool {
 
 type ReflectableColumnFamily interface {
 	ConfigureCF(*ColumnFamily)
-	NewRow() Row
 }
 
 func ReflectSchemaFrom(model interface{}) *Schema {
@@ -84,12 +83,13 @@ func ReflectSchemaFrom(model interface{}) *Schema {
 		if field.Type.Implements(rcf_type) {
 			if rcf, ok := field_value.Interface().(ReflectableColumnFamily); ok {
 				cf := &ColumnFamily{}
-				row := rcf.NewRow()
-				cf.fillFromRowType(field.Name, reflect.TypeOf(row))
 				rcf.ConfigureCF(cf)
-				schema.AddCF(cf)
-				cf_value := reflect.ValueOf(cf).Convert(field.Type)
-				model_value.FieldByIndex(field.Index).Set(cf_value)
+				if cf.rowReflector != nil {
+					cf.fillFromRowType(field.Name, cf.rowReflector.rowType.Elem())
+					schema.AddCF(cf)
+					cf_value := reflect.ValueOf(cf).Convert(field.Type)
+					model_value.FieldByIndex(field.Index).Set(cf_value)
+				}
 			}
 		}
 	}

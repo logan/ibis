@@ -13,9 +13,9 @@ var (
 )
 
 var columnTypeMap = map[string]string{
-	"[]byte":  "blob",
-	"bool":    "boolean",
-	"float64": "double",
+	"[]byte":                      "blob",
+	"bool":                        "boolean",
+	"float64":                     "double",
 	"github.com/logan/ibis.SeqID": "varchar",
 	"int64":     "bigint",
 	"string":    "varchar",
@@ -195,49 +195,48 @@ func (v *MarshalledValue) Cmp(w *MarshalledValue) (int, error) {
 
 // A Row is capable of pointing to its column family and marshalling/unmarshalling itself.
 type Row interface {
-	GetCF() *ColumnFamily
+	CF() *ColumnFamily
 	Marshal(MarshalledMap) error
 	Unmarshal(MarshalledMap) error
 }
 
-type ReflectedRow struct {
-	CF     *ColumnFamily `json:"-"`
-	self   Row
-	loaded MarshalledMap
-	total  MarshalledMap
-	dirty  MarshalledMap
+type rowReflector struct {
+	cf      *ColumnFamily
+	rowType reflect.Type
 }
 
-func (s *ReflectedRow) Reflect(self Row) Row {
-	s.self = self
-	return s.self
+func newRowReflector(cf *ColumnFamily, template interface{}) *rowReflector {
+	return &rowReflector{cf: cf, rowType: reflect.PtrTo(reflect.TypeOf(template))}
 }
 
-func (s *ReflectedRow) GetCF() *ColumnFamily {
-	return s.CF
-}
-
-func (s *ReflectedRow) loadedMap() MarshalledMap {
-	if s.loaded == nil {
-		s.loaded = make(MarshalledMap)
+func (s *rowReflector) reflectedRow(x interface{}) (Row, error) {
+	xValue := reflect.ValueOf(x)
+	if !xValue.Type().ConvertibleTo(s.rowType) {
+		return nil, ErrInvalidType
 	}
-	return s.loaded
+	return &reflectedRow{cf: s.cf, value: xValue.Convert(s.rowType).Elem()}, nil
 }
 
-func (s *ReflectedRow) Marshal(mmap MarshalledMap) error {
+type reflectedRow struct {
+	cf    *ColumnFamily
+	value reflect.Value
+}
+
+func (rr *reflectedRow) CF() *ColumnFamily {
+	return rr.cf
+}
+
+func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
 	var (
 		marshalled []byte
 		err        error
 	)
-	cf := s.GetCF()
-	loaded := s.loadedMap()
-	value := reflect.Indirect(reflect.ValueOf(s.self))
-	for _, col := range cf.Columns {
-		fieldval := value.FieldByName(col.Name)
+	for _, col := range rr.cf.Columns {
+		fieldval := rr.value.FieldByName(col.Name)
 		if fieldval.IsValid() {
 			if seqid, ok := fieldval.Interface().(SeqID); ok && seqid == "" {
-				if cf.SeqIDGenerator != nil {
-					if seqid, err = cf.NewSeqID(); err != nil {
+				if rr.cf.SeqIDGenerator != nil {
+					if seqid, err = rr.cf.NewSeqID(); err != nil {
 						return err
 					}
 					fieldval.Set(reflect.ValueOf(seqid))
@@ -253,21 +252,20 @@ func (s *ReflectedRow) Marshal(mmap MarshalledMap) error {
 			if err != nil {
 				return err
 			}
-			mmap[col.Name] = &MarshalledValue{Bytes: marshalled, TypeInfo: col.typeInfo}
-			if prev, ok := loaded[col.Name]; !ok || !bytes.Equal(prev.Bytes, marshalled) {
-				mmap[col.Name].Dirty = true
+			mmap[col.Name] = &MarshalledValue{
+				Bytes:    marshalled,
+				TypeInfo: col.typeInfo,
+				Dirty:    true,
 			}
 		}
 	}
 	return nil
 }
 
-func (s *ReflectedRow) Unmarshal(mmap MarshalledMap) error {
-	s.loaded = make(MarshalledMap)
-	value := reflect.Indirect(reflect.ValueOf(s.self))
+func (rr *reflectedRow) Unmarshal(mmap MarshalledMap) error {
 	for k, v := range mmap {
 		if v.Bytes != nil {
-			target := value.FieldByName(k)
+			target := rr.value.FieldByName(k)
 			if !target.IsValid() {
 				return ErrInvalidRowType
 			}
@@ -285,7 +283,6 @@ func (s *ReflectedRow) Unmarshal(mmap MarshalledMap) error {
 					*t = time.Time{}
 				}
 			}
-			s.loaded[k] = v
 		}
 	}
 	return nil

@@ -26,6 +26,7 @@ type ColumnFamily struct {
 
 	onCreateHooks []OnCreateHook
 	typeID        int
+	*rowReflector
 }
 
 func (cf *ColumnFamily) Cluster() Cluster {
@@ -61,6 +62,11 @@ func (cf *ColumnFamily) Key(keys ...string) *ColumnFamily {
 	return cf
 }
 
+func (cf *ColumnFamily) Reflect(template interface{}) *ColumnFamily {
+	cf.rowReflector = newRowReflector(cf, template)
+	return cf
+}
+
 func (cf *ColumnFamily) OnCreate(hook OnCreateHook) *ColumnFamily {
 	cf.onCreateHooks = append(cf.onCreateHooks, hook)
 	return cf
@@ -91,14 +97,9 @@ type Column struct {
 }
 
 func (cf *ColumnFamily) fillFromRowType(name string, row_type reflect.Type) {
-	if row_type.Kind() != reflect.Ptr {
-		panic("row must be pointer to struct")
-	}
-	row_type = row_type.Elem()
 	if row_type.Kind() != reflect.Struct {
-		panic("row must be pointer to struct")
+		panic("row must be struct")
 	}
-
 	cf.Name = strings.ToLower(name)
 	cf.Columns = columnsFromStructType(row_type)
 }
@@ -144,11 +145,6 @@ func (cf *ColumnFamily) IsBound() bool {
 	return cf.Cluster() != nil
 }
 
-// IsValidType returns true if the given Row is registered with the column family.
-func (cf *ColumnFamily) IsValidRowType(row Row) bool {
-	return cf == row.GetCF()
-}
-
 // Exists returns true if a row exists in the table's column family with the given primary key.
 func (cf *ColumnFamily) Exists(key ...interface{}) (bool, error) {
 	if !cf.IsBound() {
@@ -167,13 +163,9 @@ func (cf *ColumnFamily) Exists(key ...interface{}) (bool, error) {
 }
 
 // LoadByKey loads a row from the table by primary key and stores it in the given Row.
-func (cf *ColumnFamily) LoadByKey(row Row, key ...interface{}) error {
+func (cf *ColumnFamily) LoadByKey(dest interface{}, key ...interface{}) error {
 	if !cf.IsBound() {
 		return ErrTableNotBound
-	}
-
-	if !cf.IsValidRowType(row) {
-		return ErrInvalidType
 	}
 
 	colnames := make([]string, len(cf.Columns))
@@ -189,33 +181,27 @@ func (cf *ColumnFamily) LoadByKey(row Row, key ...interface{}) error {
 	mmap := make(MarshalledMap)
 	if !qiter.Scan(mmap.PointersTo(colnames...)...) {
 		if err := qiter.Close(); err != nil {
-            return err
-        }
-        return ErrNotFound
+			return err
+		}
+		return ErrNotFound
 	}
-	return row.Unmarshal(mmap)
+	return cf.unmarshal(dest, mmap)
 }
 
 // CommitCAS inserts a filled-in "row" into the table's column family. An error is returned if the
 // type of the row is not compatible with the one registered for the table, or if a row already
 // exists with the same primary key.
-func (cf *ColumnFamily) CommitCAS(row Row) error {
+func (cf *ColumnFamily) CommitCAS(row interface{}) error {
 	if !cf.IsBound() {
 		return ErrTableNotBound
-	}
-	if !cf.IsValidRowType(row) {
-		return ErrInvalidType
 	}
 	// TODO: handle pk changes
 	return cf.commit(row, true)
 }
 
-func (cf *ColumnFamily) Commit(row Row) error {
+func (cf *ColumnFamily) Commit(row interface{}) error {
 	if !cf.IsBound() {
 		return ErrTableNotBound
-	}
-	if !cf.IsValidRowType(row) {
-		return ErrInvalidType
 	}
 	// TODO: handle pk changes
 	return cf.commit(row, false)
@@ -232,8 +218,8 @@ func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, o
 			Keys(selectedKeys...).
 			Values(mmap.InterfacesFor(selectedKeys...)...).
 			IfNotExists()
-        cql = ins.CQL()
-        ok = true
+		cql = ins.CQL()
+		ok = true
 	} else {
 		// For an update, it makes no sense to treat primary keys as dirty.
 		for _, k := range cf.PrimaryKey {
@@ -249,21 +235,21 @@ func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, o
 				upd.Where(k+" = ?", mmap[k])
 			}
 			cql = upd.CQL()
-            ok = true
-        }
+			ok = true
+		}
 	}
-    return
+	return
 }
 
-func (cf *ColumnFamily) commit(row Row, cas bool) error {
-	mmap := make(MarshalledMap)
-	if err := row.Marshal(mmap); err != nil {
+func (cf *ColumnFamily) commit(row interface{}, cas bool) error {
+	mmap, err := cf.marshal(row)
+	if err != nil {
 		return err
 	}
 
 	cql, ok := cf.generateCommit(mmap, cas)
-    if !ok {
-        return nil
+	if !ok {
+		return nil
 	}
 
 	// Apply the INSERT or UPDATE and check results.
@@ -293,5 +279,39 @@ func (cf *ColumnFamily) commit(row Row, cas bool) error {
 	}
 
 	// Make the row unmarshal its given values, in case it is caching upon load.
+	return cf.unmarshal(row, mmap)
+}
+
+func (cf *ColumnFamily) marshal(src interface{}) (MarshalledMap, error) {
+	row, ok := src.(Row)
+	if !ok {
+		if cf.rowReflector == nil {
+			return nil, ErrInvalidType
+		}
+		var err error
+		row, err = cf.rowReflector.reflectedRow(src)
+		if err != nil {
+			return nil, err
+		}
+	}
+	mmap := make(MarshalledMap)
+	if err := row.Marshal(mmap); err != nil {
+		return nil, err
+	}
+	return mmap, nil
+}
+
+func (cf *ColumnFamily) unmarshal(dest interface{}, mmap MarshalledMap) error {
+	row, ok := dest.(Row)
+	if !ok {
+		if cf.rowReflector == nil {
+			return ErrInvalidType
+		}
+		var err error
+		row, err = cf.rowReflector.reflectedRow(dest)
+		if err != nil {
+			return err
+		}
+	}
 	return row.Unmarshal(mmap)
 }

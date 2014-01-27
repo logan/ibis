@@ -1,7 +1,6 @@
 package ibis
 
 import "errors"
-import "fmt"
 
 import "tux21b.org/v1/gocql"
 
@@ -144,7 +143,6 @@ func (cmd *updateCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, 
 		mmap[k] = (*MarshalledValue)(v.Get(vals))
 	}
 	for k, v := range cmd.key {
-		fmt.Printf("mmap[%s] = %+v\n", k, v)
 		mmap[k] = (*MarshalledValue)(v.Get(vals))
 	}
 	if _, _, err := cf.Set(mmap, false); err != nil {

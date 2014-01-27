@@ -327,11 +327,7 @@ func (s sortInterface) Swap(i, j int) {
 
 func (rs resultSet) Sort(order []order) {
 	if len(order) > 0 {
-		fmt.Println("before sort:")
-		fmt.Println(rs)
 		sort.Sort(sortInterface{rs, order})
-		fmt.Println("after sort:")
-		fmt.Println(rs)
 	}
 }
 

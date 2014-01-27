@@ -17,7 +17,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 	}
 
 	cf := &ColumnFamily{}
-	cf.fillFromRowType("test", reflect.TypeOf(&table{}))
+	cf.fillFromRowType("test", reflect.TypeOf(table{}))
 	cf.Key("Str")
 
 	expect := func(expected string) (string, bool) {
@@ -45,110 +45,102 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 }
 
 type crudRow struct {
-    ReflectedRow
-    Partition string
-    Cluster int64
-    Value string
+	Partition string
+	Cluster   int64
+	Value     string
 }
 
 type crudTable ColumnFamily
 
 func (t *crudTable) CF() *ColumnFamily {
-    return (*ColumnFamily)(t)
+	return (*ColumnFamily)(t)
 }
 
 func (t *crudTable) ConfigureCF(cf *ColumnFamily) {
-    cf.Key("Partition", "Cluster")
-}
-
-func (t *crudTable) NewRow() Row {
-    crud := &crudRow{}
-    crud.CF = t.CF()
-    return crud.Reflect(crud)
+	cf.Key("Partition", "Cluster")
+	cf.Reflect(crudRow{})
 }
 
 type crudModel struct {
-    *crudTable
+	*crudTable
 }
 
 func newCrudModel(t *testing.T) *crudModel {
-    cluster := NewTestConn(t)
-    model := &crudModel{}
-    schema := ReflectSchemaFrom(model)
-    schema.Cluster = cluster
+	cluster := NewTestConn(t)
+	model := &crudModel{}
+	schema := ReflectSchemaFrom(model)
+	schema.Cluster = cluster
 
-    var err error
-    if schema.SchemaUpdates, err = DiffLiveSchema(cluster, schema); err != nil {
-        t.Fatal(err)
-    }
-    if err = schema.ApplySchemaUpdates(); err != nil {
-        t.Fatal(err)
-    }
-    return model
+	var err error
+	if schema.SchemaUpdates, err = DiffLiveSchema(cluster, schema); err != nil {
+		t.Fatal(err)
+	}
+	if err = schema.ApplySchemaUpdates(); err != nil {
+		t.Fatal(err)
+	}
+	return model
 }
 
 func TestCrud(t *testing.T) {
-    model := newCrudModel(t)
-    defer model.crudTable.CF().Cluster().Close()
+	model := newCrudModel(t)
+	defer model.crudTable.CF().Cluster().Close()
 
-    crud := model.crudTable.NewRow().(*crudRow)
-    crud.Partition = "P1"
-    crud.Cluster = 0
-    crud.Value = "P1-0"
-    if err := model.crudTable.CF().CommitCAS(crud); err != nil {
-        t.Fatal(err)
-    }
-    err := model.crudTable.CF().CommitCAS(crud)
-    if err != ErrAlreadyExists {
-        t.Fatalf("expected ErrAlreadyExists, got %v", err)
-    }
+	crud := crudRow{Partition: "P1", Cluster: 0, Value: "P1-0"}
+	if err := model.crudTable.CF().CommitCAS(&crud); err != nil {
+		t.Fatal(err)
+	}
+	err := model.crudTable.CF().CommitCAS(&crud)
+	if err != ErrAlreadyExists {
+		t.Fatalf("expected ErrAlreadyExists, got %v", err)
+	}
 
-    crud = model.crudTable.NewRow().(*crudRow)
-    if err = model.crudTable.CF().LoadByKey(crud, "P1", 0); err != nil {
-        t.Fatal(err)
-    }
-    if err = model.crudTable.CF().LoadByKey(crud, "P1", 1); err == nil {
-        t.Fatalf("expected ErrNotFound, got %v", err)
-    }
+	crud = crudRow{}
+	if err = model.crudTable.CF().LoadByKey(&crud, "P1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if crud.Partition != "P1" || crud.Cluster != 0 || crud.Value != "P1-0" {
+		t.Error("LoadByKey didn't fill in what we expected: %+v", crud)
+	}
+	if err = model.crudTable.CF().LoadByKey(&crud, "P1", 1); err == nil {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
 
-    crud.Cluster = 1
-    crud.Value = "P1-1"
-    if err := model.crudTable.CF().CommitCAS(crud); err != nil {
-        t.Fatal(err)
-    }
-    loaded := model.crudTable.NewRow().(*crudRow)
-    if err = model.crudTable.CF().LoadByKey(loaded, "P1", 1); err != nil {
-        t.Fatal(err)
-    }
-    if loaded.Value != "P1-1" {
-        t.Errorf("expected loaded to have value of P1-1, got: %+v", loaded)
-    }
+	crud.Cluster = 1
+	crud.Value = "P1-1"
+	if err := model.crudTable.CF().CommitCAS(&crud); err != nil {
+		t.Fatal(err)
+	}
+	loaded := crudRow{}
+	if err = model.crudTable.CF().LoadByKey(&loaded, "P1", 1); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Value != "P1-1" {
+		t.Errorf("expected loaded to have value of P1-1, got: %+v", loaded)
+	}
 
-    crud.Value = "P1-1 modified"
-    if err := model.crudTable.CF().Commit(crud); err != nil {
-        t.Fatal(err)
-    }
-    loaded = model.crudTable.NewRow().(*crudRow)
-    if err = model.crudTable.CF().LoadByKey(loaded, "P1", 1); err != nil {
-        t.Fatal(err)
-    }
-    if loaded.Value != "P1-1 modified" {
-        t.Errorf("expected loaded to have value of P1-1 modified, got: %+v", loaded)
-    }
+	crud.Value = "P1-1 modified"
+	if err := model.crudTable.CF().Commit(&crud); err != nil {
+		t.Fatal(err)
+	}
+	loaded = crudRow{}
+	if err = model.crudTable.CF().LoadByKey(&loaded, "P1", 1); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Value != "P1-1 modified" {
+		t.Errorf("expected loaded to have value of P1-1 modified, got: %+v", loaded)
+	}
 
-
-    var b bool
-    if b, err = model.crudTable.CF().Exists("P2", 0); err != nil {
-        t.Fatal(err)
-    }
-    if b {
-        t.Fatal("Exists should have returned false")
-    }
-    if b, err = model.crudTable.CF().Exists("P1", 0); err != nil {
-        t.Fatal(err)
-    }
-    if !b {
-        t.Fatal("Exists should have returned true")
-    }
+	var b bool
+	if b, err = model.crudTable.CF().Exists("P2", 0); err != nil {
+		t.Fatal(err)
+	}
+	if b {
+		t.Fatal("Exists should have returned false")
+	}
+	if b, err = model.crudTable.CF().Exists("P1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if !b {
+		t.Fatal("Exists should have returned true")
+	}
 }
-

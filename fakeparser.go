@@ -33,10 +33,6 @@ func (s *statement) Compile() error {
 }
 
 func (s *statement) Execute(ks *fakeKeyspace, params ...interface{}) (resultSet, error) {
-	fmt.Println(s.text)
-	for _, p := range params {
-		fmt.Printf("  <-- %+v\n", p)
-	}
 	bind := make(valueList, len(params))
 	for i, param := range params {
 		bind[i] = LiteralValue(param)

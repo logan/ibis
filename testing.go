@@ -1,8 +1,9 @@
 package ibis
 
-import "bytes"
+//import "bytes"
 import "flag"
-import "reflect"
+
+//import "reflect"
 import "strconv"
 import "strings"
 import "testing"
@@ -19,6 +20,7 @@ func (g *testSeqIDGenerator) NewSeqID() (SeqID, error) {
 	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
 }
 
+/*
 func rowsEqual(row1, row2 Row) bool {
 	type1 := reflect.TypeOf(row1)
 	if type1 != reflect.TypeOf(row2) {
@@ -48,6 +50,7 @@ func rowsEqual(row1, row2 Row) bool {
 	}
 	return true
 }
+*/
 
 func connect(config CassandraConfig) (Cluster, error) {
 	if config.Node[0] == "" {
