@@ -188,7 +188,10 @@ func (cf *ColumnFamily) LoadByKey(row Row, key ...interface{}) error {
 	qiter := sel.CQL().Query()
 	mmap := make(MarshalledMap)
 	if !qiter.Scan(mmap.PointersTo(colnames...)...) {
-		return qiter.Close()
+		if err := qiter.Close(); err != nil {
+            return err
+        }
+        return ErrNotFound
 	}
 	return row.Unmarshal(mmap)
 }
@@ -204,38 +207,33 @@ func (cf *ColumnFamily) CommitCAS(row Row) error {
 		return ErrInvalidType
 	}
 	// TODO: handle pk changes
-	return cf.Commit(row, true)
+	return cf.commit(row, true)
 }
 
-func (cf *ColumnFamily) PrepareCommit(row Row, cas bool) ([]CQL, error) {
+func (cf *ColumnFamily) Commit(row Row) error {
 	if !cf.IsBound() {
-		return nil, ErrTableNotBound
+		return ErrTableNotBound
 	}
 	if !cf.IsValidRowType(row) {
-		return nil, ErrInvalidType
+		return ErrInvalidType
 	}
-	mmap := make(MarshalledMap)
-	if err := row.Marshal(mmap); err != nil {
-		return nil, err
-	}
-	return cf.precommit(mmap, cas)
+	// TODO: handle pk changes
+	return cf.commit(row, false)
 }
 
-func (cf *ColumnFamily) precommit(mmap MarshalledMap, cas bool) ([]CQL, error) {
-	stmts := make([]CQL, 0, 1)
-
+func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
 	// Generate the appropriate CQL.
 	selectedKeys := make([]string, len(cf.Columns))
 	for i, col := range cf.Columns {
 		selectedKeys[i] = col.Name
 	}
-	var cql CQL
 	if cas {
 		ins := InsertInto(cf).
 			Keys(selectedKeys...).
 			Values(mmap.InterfacesFor(selectedKeys...)...).
 			IfNotExists()
-		cql = ins.CQL()
+        cql = ins.CQL()
+        ok = true
 	} else {
 		// For an update, it makes no sense to treat primary keys as dirty.
 		for _, k := range cf.PrimaryKey {
@@ -251,34 +249,24 @@ func (cf *ColumnFamily) precommit(mmap MarshalledMap, cas bool) ([]CQL, error) {
 				upd.Where(k+" = ?", mmap[k])
 			}
 			cql = upd.CQL()
-		}
+            ok = true
+        }
 	}
-	return append(stmts, cql), nil
+    return
 }
 
-// Commit writes any modified values in the given row to the given CF.
-func (cf *ColumnFamily) Commit(row Row, cas bool) error {
+func (cf *ColumnFamily) commit(row Row, cas bool) error {
 	mmap := make(MarshalledMap)
 	if err := row.Marshal(mmap); err != nil {
 		return err
 	}
 
-	// TODO: make the separation between precommit and commit stronger
-	stmts, err := cf.precommit(mmap, cas)
-	if err != nil {
-		return err
-	}
-
-	// Apply all but the final statement as a batch (as these should be index updates).
-	if len(stmts) > 1 {
-		qiter := cf.Query(stmts[:len(stmts)-1]...)
-		if err = qiter.Close(); err != nil {
-			return err
-		}
+	cql, ok := cf.generateCommit(mmap, cas)
+    if !ok {
+        return nil
 	}
 
 	// Apply the INSERT or UPDATE and check results.
-	cql := stmts[len(stmts)-1]
 	qiter := cql.Query()
 	if cas {
 		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean

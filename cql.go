@@ -166,7 +166,7 @@ func (ins *InsertBuilder) Keys(keys ...string) *InsertBuilder {
 }
 
 func (ins *InsertBuilder) Values(values ...interface{}) *InsertBuilder {
-	ins.values = append(ins.values, values)
+	ins.values = append(ins.values, values...)
 	return ins
 }
 
