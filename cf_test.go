@@ -16,8 +16,8 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 		SeqID  SeqID
 	}
 
-	cf := &ColumnFamily{}
-	cf.fillFromRowType("test", reflect.TypeOf(table{}))
+	cf := &ColumnFamily{Name: "test"}
+	cf.fillFromRowType(reflect.TypeOf(table{}))
 	cf.Key("Str")
 
 	expect := func(expected string) (string, bool) {
@@ -50,19 +50,21 @@ type crudRow struct {
 	Value     string
 }
 
-type crudTable ColumnFamily
-
-func (t *crudTable) CF() *ColumnFamily {
-	return (*ColumnFamily)(t)
+type crudTable struct {
+	*ColumnFamily
 }
 
-func (t *crudTable) ConfigureCF(cf *ColumnFamily) {
-	cf.Key("Partition", "Cluster")
-	cf.Reflect(crudRow{})
+func (t *crudTable) CF() *ColumnFamily {
+	t.ColumnFamily = ReflectColumnFamily(crudRow{})
+	return t.ColumnFamily.Key("Partition", "Cluster")
 }
 
 type crudModel struct {
 	*crudTable
+}
+
+func (m *crudModel) Close() {
+	m.crudTable.ColumnFamily.Cluster().Close()
 }
 
 func newCrudModel(t *testing.T) *crudModel {
@@ -83,35 +85,35 @@ func newCrudModel(t *testing.T) *crudModel {
 
 func TestCrud(t *testing.T) {
 	model := newCrudModel(t)
-	defer model.crudTable.CF().Cluster().Close()
+	defer model.Close()
 
 	crud := crudRow{Partition: "P1", Cluster: 0, Value: "P1-0"}
-	if err := model.crudTable.CF().CommitCAS(&crud); err != nil {
+	if err := model.crudTable.CommitCAS(&crud); err != nil {
 		t.Fatal(err)
 	}
-	err := model.crudTable.CF().CommitCAS(&crud)
+	err := model.crudTable.CommitCAS(&crud)
 	if err != ErrAlreadyExists {
 		t.Fatalf("expected ErrAlreadyExists, got %v", err)
 	}
 
 	crud = crudRow{}
-	if err = model.crudTable.CF().LoadByKey(&crud, "P1", 0); err != nil {
+	if err = model.crudTable.LoadByKey(&crud, "P1", 0); err != nil {
 		t.Fatal(err)
 	}
 	if crud.Partition != "P1" || crud.Cluster != 0 || crud.Value != "P1-0" {
 		t.Error("LoadByKey didn't fill in what we expected: %+v", crud)
 	}
-	if err = model.crudTable.CF().LoadByKey(&crud, "P1", 1); err == nil {
+	if err = model.crudTable.LoadByKey(&crud, "P1", 1); err == nil {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 
 	crud.Cluster = 1
 	crud.Value = "P1-1"
-	if err := model.crudTable.CF().CommitCAS(&crud); err != nil {
+	if err := model.crudTable.CommitCAS(&crud); err != nil {
 		t.Fatal(err)
 	}
 	loaded := crudRow{}
-	if err = model.crudTable.CF().LoadByKey(&loaded, "P1", 1); err != nil {
+	if err = model.crudTable.LoadByKey(&loaded, "P1", 1); err != nil {
 		t.Fatal(err)
 	}
 	if loaded.Value != "P1-1" {
@@ -119,11 +121,11 @@ func TestCrud(t *testing.T) {
 	}
 
 	crud.Value = "P1-1 modified"
-	if err := model.crudTable.CF().Commit(&crud); err != nil {
+	if err := model.crudTable.Commit(&crud); err != nil {
 		t.Fatal(err)
 	}
 	loaded = crudRow{}
-	if err = model.crudTable.CF().LoadByKey(&loaded, "P1", 1); err != nil {
+	if err = model.crudTable.LoadByKey(&loaded, "P1", 1); err != nil {
 		t.Fatal(err)
 	}
 	if loaded.Value != "P1-1 modified" {
@@ -131,13 +133,13 @@ func TestCrud(t *testing.T) {
 	}
 
 	var b bool
-	if b, err = model.crudTable.CF().Exists("P2", 0); err != nil {
+	if b, err = model.crudTable.Exists("P2", 0); err != nil {
 		t.Fatal(err)
 	}
 	if b {
 		t.Fatal("Exists should have returned false")
 	}
-	if b, err = model.crudTable.CF().Exists("P1", 0); err != nil {
+	if b, err = model.crudTable.Exists("P1", 0); err != nil {
 		t.Fatal(err)
 	}
 	if !b {

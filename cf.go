@@ -14,6 +14,10 @@ var (
 	ErrInvalidType   = errors.New("invalid row type")
 )
 
+type CFProvider interface {
+	CF() *ColumnFamily
+}
+
 type OnCreateHook func(*ColumnFamily) error
 
 // A ColumnFamily describes how rows of a table are stored in Cassandra.
@@ -27,6 +31,10 @@ type ColumnFamily struct {
 	onCreateHooks []OnCreateHook
 	typeID        int
 	*rowReflector
+}
+
+func (cf *ColumnFamily) CF() *ColumnFamily {
+	return cf
 }
 
 func (cf *ColumnFamily) Cluster() Cluster {
@@ -62,11 +70,6 @@ func (cf *ColumnFamily) Key(keys ...string) *ColumnFamily {
 	return cf
 }
 
-func (cf *ColumnFamily) Reflect(template interface{}) *ColumnFamily {
-	cf.rowReflector = newRowReflector(cf, template)
-	return cf
-}
-
 func (cf *ColumnFamily) OnCreate(hook OnCreateHook) *ColumnFamily {
 	cf.onCreateHooks = append(cf.onCreateHooks, hook)
 	return cf
@@ -96,11 +99,10 @@ type Column struct {
 	typeInfo *gocql.TypeInfo
 }
 
-func (cf *ColumnFamily) fillFromRowType(name string, row_type reflect.Type) {
+func (cf *ColumnFamily) fillFromRowType(row_type reflect.Type) {
 	if row_type.Kind() != reflect.Struct {
 		panic("row must be struct")
 	}
-	cf.Name = strings.ToLower(name)
 	cf.Columns = columnsFromStructType(row_type)
 }
 
@@ -314,4 +316,10 @@ func (cf *ColumnFamily) unmarshal(dest interface{}, mmap MarshalledMap) error {
 		}
 	}
 	return row.Unmarshal(mmap)
+}
+
+func ReflectColumnFamily(template interface{}) *ColumnFamily {
+	cf := &ColumnFamily{}
+	cf.rowReflector = newRowReflector(cf, template)
+	return cf
 }

@@ -57,10 +57,6 @@ func (s *Schema) IsBound() bool {
 	return s.Cluster != nil
 }
 
-type ReflectableColumnFamily interface {
-	ConfigureCF(*ColumnFamily)
-}
-
 func ReflectSchemaFrom(model interface{}) *Schema {
 	ptr_type := reflect.TypeOf(model)
 	if ptr_type.Kind() != reflect.Ptr {
@@ -71,26 +67,38 @@ func ReflectSchemaFrom(model interface{}) *Schema {
 	if model_type.Kind() != reflect.Struct {
 		panic("model must be pointer to struct")
 	}
-	rcf_type := reflect.TypeOf((*ReflectableColumnFamily)(nil)).Elem()
+	providerType := reflect.TypeOf((*CFProvider)(nil)).Elem()
+	idGenType := reflect.TypeOf((*SeqIDGenerator)(nil)).Elem()
 	schema := NewSchema()
+
+	var idGen SeqIDGenerator
 	for i := 0; i < model_type.NumField(); i++ {
 		field := model_type.Field(i)
 		if field.PkgPath != "" {
 			// non-empty PkgPath indicates unexported field, do not reflect these
 			continue
 		}
-		field_value := reflect.New(field.Type.Elem())
-		if field.Type.Implements(rcf_type) {
-			if rcf, ok := field_value.Interface().(ReflectableColumnFamily); ok {
-				cf := &ColumnFamily{}
-				rcf.ConfigureCF(cf)
-				if cf.rowReflector != nil {
-					cf.fillFromRowType(field.Name, cf.rowReflector.rowType.Elem())
-					schema.AddCF(cf)
-					cf_value := reflect.ValueOf(cf).Convert(field.Type)
-					model_value.FieldByIndex(field.Index).Set(cf_value)
+		field_value := model_value.FieldByIndex(field.Index)
+		if field.Type.ConvertibleTo(providerType) {
+			if provider, ok := field_value.Interface().(CFProvider); ok {
+				if field_value.IsNil() {
+					field_value.Set(reflect.New(field.Type.Elem()))
+					provider = field_value.Interface().(CFProvider)
 				}
+				cf := provider.CF()
+				cf.Name = strings.ToLower(field.Name)
+				if cf.rowReflector != nil {
+					cf.fillFromRowType(cf.rowReflector.rowType.Elem())
+				}
+				schema.AddCF(cf)
 			}
+		} else if field.Type.ConvertibleTo(idGenType) {
+			idGen = field_value.Interface().(SeqIDGenerator)
+		}
+	}
+	if idGen != nil {
+		for _, cf := range schema.CFs {
+			cf.SeqIDGenerator = idGen
 		}
 	}
 	return schema

@@ -8,30 +8,44 @@ type row struct {
 	Int int64
 }
 
-type table ColumnFamily
+type table struct {
+	*ColumnFamily
+}
 
-func (t *table) ConfigureCF(cf *ColumnFamily) {
-	cf.Key("Str")
-	cf.Reflect(row{})
+func (t *table) CF() *ColumnFamily {
+	t.ColumnFamily = ReflectColumnFamily(row{})
+	return t.ColumnFamily.Key("Str")
 }
 
 func TestReflectSchemaFrom(t *testing.T) {
 	type model struct {
-		T          *table
+		Defined    *ColumnFamily
+		Reflected  *table
 		unexported *table // having this here shouldn't break anything
 	}
 
-	expected := &ColumnFamily{
-		Name: "t",
-		Columns: []Column{
-			Column{Name: "Str", Type: "varchar", typeInfo: TIVarchar},
-			Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
-		},
+	expectedColumns := []Column{
+		Column{Name: "Str", Type: "varchar", typeInfo: TIVarchar},
+		Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
 	}
-	expected.Key("Str").Reflect(row{}).typeID = 1
+	m := &model{}
+	m.Defined = &ColumnFamily{Columns: expectedColumns}
+	m.Defined.Key("Str")
+	t.Logf("m.Defined.Columns = %+v", m.Defined.Columns)
+	schema := ReflectSchemaFrom(m)
+	t.Logf("m.Defined.Columns = %+v", m.Defined.Columns)
 
-	schema := ReflectSchemaFrom(&model{})
-	if !reflect.DeepEqual(expected.Columns, schema.CFs["t"].Columns) {
-		t.Errorf("\nexpected: %+v\nreceived: %+v", expected, *schema.CFs["bags"])
+	cf, ok := schema.CFs["defined"]
+	if !ok {
+		t.Error("column family 'defined' wasn't included")
+	} else if !reflect.DeepEqual(expectedColumns, cf.Columns) {
+		t.Errorf("\nexpected: %+v\nreceived: %+v", expectedColumns, cf.Columns)
+	}
+
+	cf, ok = schema.CFs["reflected"]
+	if !ok {
+		t.Error("column family 'reflected' wasn't included")
+	} else if !reflect.DeepEqual(expectedColumns, cf.Columns) {
+		t.Errorf("\nexpected: %+v\nreceived: %+v", expectedColumns, cf.Columns)
 	}
 }

@@ -81,16 +81,19 @@ type marshalTestRow struct {
 	SeqID SeqID
 }
 
-type marshalTestTable ColumnFamily
+type marshalTestTable struct {
+	*ColumnFamily
+}
 
-func (t *marshalTestTable) ConfigureCF(cf *ColumnFamily) {
-	cf.Reflect(marshalTestRow{})
+func (t *marshalTestTable) CF() *ColumnFamily {
+	t.ColumnFamily = ReflectColumnFamily(marshalTestRow{})
+	return t.ColumnFamily
 }
 
 func TestReflectedMarshalAndUnmarshal(t *testing.T) {
 	model := struct{ T *marshalTestTable }{}
 	ReflectSchemaFrom(&model)
-	cf := (*ColumnFamily)(model.T)
+	cf := model.T.ColumnFamily
 	g := testSeqIDGenerator(36 * 36 * 36) // "1000" in base-36
 	cf.SeqIDGenerator = &g
 
