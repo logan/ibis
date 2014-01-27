@@ -80,7 +80,7 @@ func TestDiffLiveSchema(t *testing.T) {
 	}
 	model.CFs["T1"].Key("A")
 
-	expected := &SchemaDiff{Creations: []*ColumnFamily{model.CFs["T1"]}}
+	expected := &SchemaDiff{creations: []*ColumnFamily{model.CFs["T1"]}}
 	diff, err = DiffLiveSchema(cluster, model)
 	if err != nil {
 		t.Fatal(err)
@@ -101,9 +101,9 @@ func TestDiffLiveSchema(t *testing.T) {
 	}
 	model.CFs["T2"].Key("X")
 	expected = &SchemaDiff{
-		Creations: []*ColumnFamily{model.CFs["T2"]},
-		Alterations: []TableAlteration{
-			TableAlteration{
+		creations: []*ColumnFamily{model.CFs["T2"]},
+		alterations: []tableAlteration{
+			tableAlteration{
 				TableName:      "T1",
 				NewColumns:     model.CFs["T1"].Columns[2:],
 				AlteredColumns: []Column{model.CFs["T1"].Columns[1]},

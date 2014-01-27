@@ -6,13 +6,13 @@ import "strings"
 
 // A SchemaDiff enumerates the changes necessary to transform one schema into another.
 type SchemaDiff struct {
-	Creations   []*ColumnFamily   // tables that are completely missing from the former schema
-	Alterations []TableAlteration // tables that have missing or altered columns
+	creations   []*ColumnFamily   // tables that are completely missing from the former schema
+	alterations []tableAlteration // tables that have missing or altered columns
 }
 
 // Size returns the total number of creations and alterations in the SchemaDiff.
 func (d *SchemaDiff) Size() int {
-	return len(d.Creations) + len(d.Alterations)
+	return len(d.creations) + len(d.alterations)
 }
 
 // String constructs a human-readable string describing the SchemaDiff in CQL.
@@ -21,10 +21,10 @@ func (d *SchemaDiff) String() string {
 		return "no diff"
 	}
 	changes := make([]string, 0, d.Size())
-	for _, t := range d.Creations {
+	for _, t := range d.creations {
 		changes = append(changes, t.CreateStatement().String())
 	}
-	for _, a := range d.Alterations {
+	for _, a := range d.alterations {
 		for _, cql := range a.AlterStatements() {
 			changes = append(changes, cql.String())
 		}
@@ -34,7 +34,7 @@ func (d *SchemaDiff) String() string {
 
 // Apply issues CQL statements to transform the former schema into the latter.
 func (d *SchemaDiff) Apply(cluster Cluster) error {
-	for _, t := range d.Creations {
+	for _, t := range d.creations {
 		cql := t.CreateStatement()
 		cql.Cluster(cluster)
 		if err := cql.Query().Exec(); err != nil {
@@ -46,7 +46,7 @@ func (d *SchemaDiff) Apply(cluster Cluster) error {
 			}
 		}
 	}
-	for _, a := range d.Alterations {
+	for _, a := range d.alterations {
 		for _, s := range a.AlterStatements() {
 			s.Cluster(cluster)
 			if err := s.Query().Exec(); err != nil {
@@ -57,20 +57,20 @@ func (d *SchemaDiff) Apply(cluster Cluster) error {
 	return nil
 }
 
-// TableAlteration describes a set of column additions and alterations for a single table.
-type TableAlteration struct {
+// tableAlteration describes a set of column additions and alterations for a single table.
+type tableAlteration struct {
 	TableName      string
 	NewColumns     []Column
 	AlteredColumns []Column
 }
 
 // Size returns the total number of new and altered columns.
-func (a TableAlteration) Size() int {
+func (a tableAlteration) Size() int {
 	return len(a.NewColumns) + len(a.AlteredColumns)
 }
 
 // AlterStatements generates a list of CQL statements, one for each new or altered column.
-func (a TableAlteration) AlterStatements() []CQL {
+func (a tableAlteration) AlterStatements() []CQL {
 	alts := make([]CQL, 0, a.Size())
 	for _, col := range a.NewColumns {
 		var b CQLBuilder
@@ -190,11 +190,11 @@ func DiffLiveSchema(c Cluster, model *Schema) (*SchemaDiff, error) {
 			model_t.typeID = t.typeID
 		}
 	}
-	var diff = &SchemaDiff{make([]*ColumnFamily, 0), make([]TableAlteration, 0)}
+	var diff = &SchemaDiff{make([]*ColumnFamily, 0), make([]tableAlteration, 0)}
 	for name, model_table := range model.CFs {
 		live_table, ok := live.CFs[strings.ToLower(name)]
 		if ok {
-			alteration := TableAlteration{name, make([]Column, 0), make([]Column, 0)}
+			alteration := tableAlteration{name, make([]Column, 0), make([]Column, 0)}
 			old_cols := make(map[string]string)
 			for _, col := range live_table.Columns {
 				old_cols[strings.ToLower(col.Name)] = col.Type
@@ -210,12 +210,12 @@ func DiffLiveSchema(c Cluster, model *Schema) (*SchemaDiff, error) {
 				}
 			}
 			if len(alteration.NewColumns)+len(alteration.AlteredColumns) > 0 {
-				diff.Alterations = append(diff.Alterations, alteration)
+				diff.alterations = append(diff.alterations, alteration)
 			}
 		} else {
 			model_table.typeID = model.nextTypeID
 			model.nextTypeID++
-			diff.Creations = append(diff.Creations, model_table)
+			diff.creations = append(diff.creations, model_table)
 		}
 	}
 	return diff, nil
