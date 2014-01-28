@@ -59,6 +59,8 @@ func (t *crudTable) CF() *ColumnFamily {
 	return t.ColumnFamily.Key("Partition", "Cluster")
 }
 
+func (t *crudTable) crud() *crudTable { return t }
+
 type crudModel struct {
 	*crudTable
 }
@@ -144,5 +146,23 @@ func TestCrud(t *testing.T) {
 	}
 	if !b {
 		t.Fatal("Exists should have returned true")
+	}
+}
+
+func TestProvisioning(t *testing.T) {
+	model := newCrudModel(t)
+	defer model.Close()
+
+	type crudProvider interface {
+		crud() *crudTable
+	}
+	model.crudTable.Provide(crudProvider(model.crudTable))
+
+	var p crudProvider
+	if !model.GetProvider(&p) {
+		t.Fatal("GetProvider returned false")
+	}
+	if p.crud() != model.crudTable {
+		t.Fatalf("crudProvider returned something unexpected: %v vs. %v", p.crud(), model.crudTable)
 	}
 }

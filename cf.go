@@ -34,6 +34,7 @@ type ColumnFamily struct {
 
 	typeID int
 	*rowReflector
+	provisions []reflect.Value
 }
 
 // CF returns a pointer to the column family it's called on. This is so *ColumnFamily implements
@@ -148,6 +149,48 @@ func goTypeToCassType(t reflect.Type) (string, bool) {
 	}
 	result, ok := columnTypeMap[type_name]
 	return result, ok
+}
+
+// Provide associates an interface with the column family for lookup with GetProvider.
+func (cf *ColumnFamily) Provide(x interface{}) {
+	if cf.provisions == nil {
+		cf.provisions = make([]reflect.Value, 0)
+	}
+	cf.provisions = append(cf.provisions, reflect.ValueOf(x))
+}
+
+// GetProvider looks up a provider implementing the interface that dest points to. Providers are
+// registered with the Provider method. The reference to the first compatible one found will be
+// copied into dest, in which case true is returned. Otherwise dest is unmodified and false is
+// returned.
+//
+//        cf.Provide(logImpl.(Logger))
+//        ...
+//        var logger Logger
+//        if cf.GetProvider(&logger) {
+//          logger.Log("it works!")
+//        }
+//
+func (cf *ColumnFamily) GetProvider(dest interface{}) bool {
+	destPtrType := reflect.TypeOf(dest)
+	if destPtrType.Kind() != reflect.Ptr {
+		panic("destination must be a pointer to an interface")
+	}
+	destValue := reflect.ValueOf(dest).Elem()
+	destType := destValue.Type()
+	if destType.Kind() != reflect.Interface {
+		panic("destination must be a pointer to an interface")
+	}
+	if cf.provisions == nil {
+		return false
+	}
+	for _, provision := range cf.provisions {
+		if provision.Type().ConvertibleTo(destType) {
+			destValue.Set(provision)
+			return true
+		}
+	}
+	return false
 }
 
 // IsBound returns true if the column family is part of a schema that is connected to a cluster.

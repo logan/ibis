@@ -31,6 +31,20 @@ func (s *Schema) AddCF(cf *ColumnFamily) {
 	}
 }
 
+// GetProvider checks all of this schema's column families for a provider that implements the
+// interface pointed to by dest. A panic will occur if dest is not a pointer to an interface.
+// If multiple compatible providers are registered across the schema, an arbitrary one will be
+// used. If a compatible provider is found, it is copied into *dest and true is returned. Otherwise
+// false is returned.
+func (s *Schema) GetProvider(dest interface{}) bool {
+	for _, cf := range s.CFs {
+		if cf.GetProvider(dest) {
+			return true
+		}
+	}
+	return false
+}
+
 // DialCassandra uses gocql to connect to a Cassandra cluster and binds this schema to it.
 //
 // Upon connecting, the live schema is automatically scanned and compared to this one. The
