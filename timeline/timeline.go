@@ -1,7 +1,6 @@
 package timeline
 
 import "encoding/json"
-import "fmt"
 import "strings"
 
 import "github.com/logan/ibis"
@@ -12,11 +11,16 @@ type IndexTable struct {
 
 func (t *IndexTable) CF() *ibis.ColumnFamily {
 	t.ColumnFamily = ibis.ReflectColumnFamily(Entry{})
+	t.Provide(IndexProvider(t))
 	return t.Key("Partition", "SeqID")
 }
 
 func (t *IndexTable) Index(keys ...string) *Index {
 	return &Index{Table: t, Name: strings.Join(keys, "")}
+}
+
+type IndexProvider interface {
+	Index(keys ...string) *Index
 }
 
 type Index struct {
@@ -63,6 +67,10 @@ func (e *Entry) decodePartition() string {
 	return e.Partition
 }
 
+func (e *Entry) Decode(v interface{}) error {
+	return json.Unmarshal(e.Bytes, v)
+}
+
 type EntryChannel chan *Entry
 
 type IndexScanner struct {
@@ -79,7 +87,10 @@ func NewIndexScanner(index *Index) *IndexScanner {
 }
 
 func (scanner *IndexScanner) Since(seqid ibis.SeqID) {
-	scanner.since = seqid.Pad()
+	if seqid != "" {
+		seqid = seqid.Pad()
+	}
+	scanner.since = seqid
 }
 
 func (scanner *IndexScanner) Start() EntryChannel {
