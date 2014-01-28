@@ -8,10 +8,11 @@ import "strings"
 import "tux21b.org/v1/gocql"
 
 var (
-	ErrNotFound      = errors.New("not found")
-	ErrAlreadyExists = errors.New("already exists")
-	ErrTableNotBound = errors.New("table not connected to a cluster")
-	ErrInvalidType   = errors.New("invalid row type")
+	ErrNotFound        = errors.New("not found")
+	ErrAlreadyExists   = errors.New("already exists")
+	ErrTableNotBound   = errors.New("table not connected to a cluster")
+	ErrInvalidType     = errors.New("invalid row type")
+	ErrNothingToCommit = errors.New("nothing to commit")
 )
 
 // CFProvider is an interface for producing and configuring a column family definition. Use
@@ -234,6 +235,30 @@ func (cf *ColumnFamily) Commit(row interface{}) error {
 	return cf.commit(row, false)
 }
 
+// MakeCommit returns the CQL statement that would commit the given row. ErrNothingToCommit may be
+// returned.
+func (cf *ColumnFamily) MakeCommit(row interface{}) (CQL, error) {
+	mmap, err := cf.marshal(row)
+	if err != nil {
+		return CQL{}, err
+	}
+	cql, ok := cf.generateCommit(mmap, false)
+	if !ok {
+		return CQL{}, ErrNothingToCommit
+	}
+	return cql, nil
+}
+
+// MakeCommitCAS returns the CQL statement that would CAS-commit the given row.
+func (cf *ColumnFamily) MakeCommitCAS(row interface{}) (CQL, error) {
+	mmap, err := cf.marshal(row)
+	if err != nil {
+		return CQL{}, err
+	}
+	cql, _ := cf.generateCommit(mmap, true)
+	return cql, nil
+}
+
 func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
 	// Generate the appropriate CQL.
 	selectedKeys := make([]string, len(cf.Columns))
@@ -341,6 +366,37 @@ func (cf *ColumnFamily) unmarshal(dest interface{}, mmap MarshalledMap) error {
 		}
 	}
 	return row.Unmarshal(mmap)
+}
+
+func (cf *ColumnFamily) Scanner(query Query) CFQuery {
+	return CFQuery{cf, query, nil}
+}
+
+type CFQuery struct {
+	cf    *ColumnFamily
+	query Query
+	err   error
+}
+
+func (q *CFQuery) ScanRow(dest interface{}) bool {
+	cols := make([]string, len(q.cf.Columns))
+	for i, col := range q.cf.Columns {
+		cols[i] = col.Name
+	}
+	mmap := make(MarshalledMap)
+	if ok := q.query.Scan(mmap.PointersTo(cols...)...); !ok {
+		q.err = q.query.Close()
+		return false
+	}
+	q.err = q.cf.unmarshal(dest, mmap)
+	return q.err == nil
+}
+
+func (q *CFQuery) Close() error {
+	if q.err == nil {
+		return q.query.Close()
+	}
+	return q.err
 }
 
 // ReflectColumnFamily generates a column family definition from a struct value. It uses reflection

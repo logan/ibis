@@ -1,5 +1,6 @@
 package ibis
 
+import "fmt"
 import "strconv"
 import "time"
 
@@ -14,6 +15,10 @@ func init() {
 
 // A SeqID is a base-36 string that is intended to uniquely identify a sort objects.
 type SeqID string
+
+func (s SeqID) Pad() SeqID {
+	return SeqID(fmt.Sprintf("%013s", s))
+}
 
 // SeqIDGenerator provides a way to generate SeqIDs. They should be unique and roughly ascending.
 type SeqIDGenerator interface {

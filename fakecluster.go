@@ -481,7 +481,7 @@ func LiteralValue(val interface{}) *MarshalledValue {
 		ti = TIDouble
 	case int, int64:
 		ti = TIBigInt
-	case string:
+	case string, SeqID:
 		ti = TIVarchar
 	case time.Time:
 		ti = TITimestamp

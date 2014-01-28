@@ -10,9 +10,14 @@ var (
 	flagKeyspace = flag.String("keyspace", "creative_test", "name of throwaway keyspace for testing")
 )
 
-type testSeqIDGenerator uint64
+type FakeSeqIDGenerator uint64
 
-func (g *testSeqIDGenerator) NewSeqID() (SeqID, error) {
+func (g *FakeSeqIDGenerator) Set(next uint64) *FakeSeqIDGenerator {
+	*g = FakeSeqIDGenerator(next - 1)
+	return g
+}
+
+func (g *FakeSeqIDGenerator) NewSeqID() (SeqID, error) {
 	*g++
 	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
 }

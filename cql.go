@@ -157,14 +157,13 @@ func (sel *SelectBuilder) Limit(limit int) *SelectBuilder {
 func (sel *SelectBuilder) CQL() CQL {
 	var b CQLBuilder
 	b.Append("SELECT ")
-	cols := sel.cols
-	if cols == nil || (len(cols) == 1 && cols[0] == "*") {
-		cols = make([]string, len(sel.cf.Columns))
+	if sel.cols == nil || (len(sel.cols) == 1 && sel.cols[0] == "*") {
+		sel.cols = make([]string, len(sel.cf.Columns))
 		for i, col := range sel.cf.Columns {
-			cols[i] = col.Name
+			sel.cols[i] = col.Name
 		}
 	}
-	b.Append(strings.Join(cols, ", "))
+	b.Append(strings.Join(sel.cols, ", "))
 	b.Append(" FROM ")
 	b.Append(sel.cf.Name)
 	if sel.where != nil {
@@ -179,6 +178,10 @@ func (sel *SelectBuilder) CQL() CQL {
 	cql := b.CQL()
 	cql.Cluster(sel.cf.Cluster())
 	return cql
+}
+
+func (sel *SelectBuilder) Query() Query {
+	return sel.CQL().Query()
 }
 
 // InsertBuilder provides a declarative interface for building CQL INSERT statements.
@@ -233,6 +236,10 @@ func (ins *InsertBuilder) CQL() CQL {
 	return cql
 }
 
+func (ins *InsertBuilder) Query() Query {
+	return ins.CQL().Query()
+}
+
 // UpdateBuilder provides a declarative interface for building CQL UPDATE statements.
 type UpdateBuilder struct {
 	cf    *ColumnFamily
@@ -272,6 +279,10 @@ func (upd *UpdateBuilder) CQL() CQL {
 	return cql
 }
 
+func (upd *UpdateBuilder) Query() Query {
+	return upd.CQL().Query()
+}
+
 // DeleteBuilder provides a declarative interface for building CQL DELETE statements.
 type DeleteBuilder struct {
 	cf    *ColumnFamily
@@ -298,4 +309,8 @@ func (del *DeleteBuilder) CQL() CQL {
 	cql := del.where.join("DELETE FROM "+del.cf.Name+" WHERE ", " AND ")
 	cql.Cluster(del.cf.Cluster())
 	return cql
+}
+
+func (del *DeleteBuilder) Query() Query {
+	return del.CQL().Query()
 }
