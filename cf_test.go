@@ -70,7 +70,7 @@ func (m *crudModel) Close() {
 func newCrudModel(t *testing.T) *crudModel {
 	cluster := NewTestConn(t)
 	model := &crudModel{}
-	schema := ReflectSchemaFrom(model)
+	schema := ReflectSchema(model)
 	schema.Cluster = cluster
 
 	var err error

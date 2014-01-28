@@ -46,7 +46,7 @@ func NewModel(cluster ibis.Cluster) (*Model, error) {
 		return nil, err
 	}
 	model := &Model{SeqIDGenerator: idgen}
-	schema := ibis.ReflectSchemaFrom(model)
+	schema := ibis.ReflectSchema(model)
 	schema.Cluster = cluster
 
 	if schema.SchemaUpdates, err = ibis.DiffLiveSchema(cluster, schema); err != nil {

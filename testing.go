@@ -1,9 +1,6 @@
 package ibis
 
-//import "bytes"
 import "flag"
-
-//import "reflect"
 import "strconv"
 import "strings"
 import "testing"
@@ -20,38 +17,6 @@ func (g *testSeqIDGenerator) NewSeqID() (SeqID, error) {
 	return SeqID(strconv.FormatUint(uint64(*g), 36)), nil
 }
 
-/*
-func rowsEqual(row1, row2 Row) bool {
-	type1 := reflect.TypeOf(row1)
-	if type1 != reflect.TypeOf(row2) {
-		return false
-	}
-	p1 := reflect.ValueOf(row1).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
-	p2 := reflect.ValueOf(row2).Elem().FieldByName("ReflectedRow").Interface().(ReflectedRow)
-	if len(p1.loaded) != len(p2.loaded) {
-		return false
-	}
-	for k, v1 := range p1.loaded {
-		v2, ok := p2.loaded[k]
-		if !ok || !bytes.Equal(v1.Bytes, v2.Bytes) {
-			return false
-		}
-	}
-	rv1 := make(MarshalledMap)
-	if err := row1.Marshal(rv1); err != nil {
-		return false
-	}
-	rv2 := make(MarshalledMap)
-	if err := row2.Marshal(rv2); err != nil {
-		return false
-	}
-	if !reflect.DeepEqual(rv1, rv2) {
-		return false
-	}
-	return true
-}
-*/
-
 func connect(config CassandraConfig) (Cluster, error) {
 	if config.Node[0] == "" {
 		return FakeCassandra(), nil
@@ -63,7 +28,9 @@ type testConn struct {
 	Cluster
 }
 
-// NewTestConn connects to Cassandra and establishes an empty keyspace to operate in.
+// NewTestConn connects to the cluster given by the -cluster flag and establishes an empty keyspace
+// to operate in. If -cluster is not given or empty, FakeCassandra is used, which may not be
+// representative of real Cassandra behavior but is faster and more suitable for unit testing.
 func NewTestConn(t *testing.T) Cluster {
 	config := CassandraConfig{
 		Node:        strings.Split(*flagCluster, ","),

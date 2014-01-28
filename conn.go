@@ -18,10 +18,9 @@ type CassandraConfig struct {
 	Consistency string
 }
 
-// cassandraConn is an open connection to a Cassandra cluster associated with a particular keyspace.
 type cassandraConn struct {
-	*gocql.Session                 // The underlying gocql Session, for querying the cluster.
-	Config         CassandraConfig // The settings used to establish the session.
+	*gocql.Session
+	Config CassandraConfig
 }
 
 // DialCassandra connects to a Cassandra cluster as specified by the given config.

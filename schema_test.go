@@ -17,7 +17,7 @@ func (t *table) CF() *ColumnFamily {
 	return t.ColumnFamily.Key("Str")
 }
 
-func TestReflectSchemaFrom(t *testing.T) {
+func TestReflectSchema(t *testing.T) {
 	type model struct {
 		Defined    *ColumnFamily
 		Reflected  *table
@@ -32,7 +32,7 @@ func TestReflectSchemaFrom(t *testing.T) {
 	m.Defined = &ColumnFamily{Columns: expectedColumns}
 	m.Defined.Key("Str")
 	t.Logf("m.Defined.Columns = %+v", m.Defined.Columns)
-	schema := ReflectSchemaFrom(m)
+	schema := ReflectSchema(m)
 	t.Logf("m.Defined.Columns = %+v", m.Defined.Columns)
 
 	cf, ok := schema.CFs["defined"]

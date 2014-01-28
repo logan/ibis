@@ -23,6 +23,7 @@ var columnTypeMap = map[string]string{
 }
 
 var (
+	// gocql.TypeInfos that ibis supports.
 	TIBoolean   = &gocql.TypeInfo{Type: gocql.TypeBoolean}
 	TIBlob      = &gocql.TypeInfo{Type: gocql.TypeBlob}
 	TIDouble    = &gocql.TypeInfo{Type: gocql.TypeDouble}
@@ -49,24 +50,31 @@ var column_validators = map[string]string{
 	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
 }
 
+// MarshalledValue contains the bytes and type info for a value that has already been marshalled for
+// Cassandra.
 type MarshalledValue struct {
 	Bytes    []byte
 	TypeInfo *gocql.TypeInfo
 	Dirty    bool
 }
 
+// MarshalCQL trivially implements the gocql.Marshaler interface.
 func (rv *MarshalledValue) MarshalCQL(info *gocql.TypeInfo) ([]byte, error) {
 	return rv.Bytes, nil
 }
 
+// UnmarshalCQL trivially implements the gocql.Marshaler interface.
 func (rv *MarshalledValue) UnmarshalCQL(info *gocql.TypeInfo, bytes []byte) error {
 	rv.Bytes = bytes
 	rv.TypeInfo = info
 	return nil
 }
 
+// MarshalledMap is a map of column names to marshalled values.
 type MarshalledMap map[string]*MarshalledValue
 
+// InterfacesFor returns the marshalled values associated with the given keys as bare interfaces.
+// They are returned in order corresponding to that of the given keys.
 func (rv *MarshalledMap) InterfacesFor(keys ...string) []interface{} {
 	result := make([]interface{}, len(keys))
 	for i, k := range keys {
@@ -75,6 +83,9 @@ func (rv *MarshalledMap) InterfacesFor(keys ...string) []interface{} {
 	return result
 }
 
+// PointersTo associates new marshalled values in the map and returns pointers to them to be filled
+// in by methods like Query.Scan. The pointers are returned as a list of interfaces in order
+// corresponding to that of the given keys.
 func (rv *MarshalledMap) PointersTo(keys ...string) []interface{} {
 	result := make([]interface{}, len(keys))
 	for i, k := range keys {
@@ -84,6 +95,8 @@ func (rv *MarshalledMap) PointersTo(keys ...string) []interface{} {
 	return result
 }
 
+// ValuesOf returns the marshalled values associated with the given keys, in the order given by
+// keys. Keys with no association will have a corresponding nil value returned.
 func (rv *MarshalledMap) ValuesOf(keys ...string) []*MarshalledValue {
 	result := make([]*MarshalledValue, len(keys))
 	for i, k := range keys {
@@ -92,6 +105,8 @@ func (rv *MarshalledMap) ValuesOf(keys ...string) []*MarshalledValue {
 	return result
 }
 
+// Keys returns the keys in the map that have an associated marshalled value, in no particular
+// order.
 func (rv *MarshalledMap) Keys() []string {
 	keys := make([]string, 0, len(*rv))
 	for k, v := range *rv {
@@ -102,6 +117,7 @@ func (rv *MarshalledMap) Keys() []string {
 	return keys
 }
 
+// DirtyKeys returns the keys in the map that are associated with a dirty marshalled value.
 func (rv *MarshalledMap) DirtyKeys() []string {
 	dirties := make([]string, 0, len(*rv))
 	for k, v := range *rv {
@@ -112,7 +128,7 @@ func (rv *MarshalledMap) DirtyKeys() []string {
 	return dirties
 }
 
-func (v *MarshalledValue) Cmp(w *MarshalledValue) (int, error) {
+func (v *MarshalledValue) cmp(w *MarshalledValue) (int, error) {
 	if v == nil {
 		if w == nil {
 			return 0, nil

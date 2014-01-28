@@ -37,6 +37,9 @@ type fakeCluster struct {
 	CurrentKeyspace string
 }
 
+// FakeCassandra returns a Cluster interface to an in-memory imitation of Cassandra. This is great
+// for unit testing, but beware that the fake implementation is quite rudimentary, incomplete, and
+// probably inaccurate.
 func FakeCassandra() Cluster {
 	c := &fakeCluster{Keyspaces: make(map[string]*fakeKeyspace)}
 	c.AddKeyspace("system")
@@ -255,7 +258,7 @@ func (cmp *comparison) match(row MarshalledMap, binds valueList) (bool, error) {
 		return false, nil
 	}
 	v := (*MarshalledValue)(left)
-	c, err := v.Cmp(cmp.val.Get(binds))
+	c, err := v.cmp(cmp.val.Get(binds))
 	if err != nil {
 		return false, err
 	}
@@ -306,7 +309,7 @@ func (s sortInterface) Less(i, j int) bool {
 		if vj == nil {
 			return o.dir == desc
 		}
-		cmp, err := vi.Cmp(vj)
+		cmp, err := vi.cmp(vj)
 		if err != nil {
 			return false
 		}
@@ -413,7 +416,7 @@ func (r *MarshalledMap) Match(key []string, values []*MarshalledValue) bool {
 		if !ok || v == nil {
 			return false
 		}
-		cmp, err := (*MarshalledValue)(values[i]).Cmp((*MarshalledValue)(v))
+		cmp, err := (*MarshalledValue)(values[i]).cmp((*MarshalledValue)(v))
 		if err != nil || cmp != 0 {
 			return false
 		}

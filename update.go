@@ -4,7 +4,7 @@ import "encoding/json"
 import "strconv"
 import "strings"
 
-// A SchemaDiff enumerates the changes necessary to transform one schema into another.
+// SchemaDiff enumerates the changes necessary to transform one schema into another.
 type SchemaDiff struct {
 	creations   []*ColumnFamily   // tables that are completely missing from the former schema
 	alterations []tableAlteration // tables that have missing or altered columns
@@ -40,11 +40,6 @@ func (d *SchemaDiff) Apply(cluster Cluster) error {
 		if err := cql.Query().Exec(); err != nil {
 			return err
 		}
-		for _, hook := range t.onCreateHooks {
-			if err := hook(t); err != nil {
-				return err
-			}
-		}
 	}
 	for _, a := range d.alterations {
 		for _, s := range a.AlterStatements() {
@@ -57,19 +52,16 @@ func (d *SchemaDiff) Apply(cluster Cluster) error {
 	return nil
 }
 
-// tableAlteration describes a set of column additions and alterations for a single table.
 type tableAlteration struct {
 	TableName      string
 	NewColumns     []Column
 	AlteredColumns []Column
 }
 
-// Size returns the total number of new and altered columns.
 func (a tableAlteration) Size() int {
 	return len(a.NewColumns) + len(a.AlteredColumns)
 }
 
-// AlterStatements generates a list of CQL statements, one for each new or altered column.
 func (a tableAlteration) AlterStatements() []CQL {
 	alts := make([]CQL, 0, a.Size())
 	for _, col := range a.NewColumns {
@@ -87,8 +79,8 @@ func (a tableAlteration) AlterStatements() []CQL {
 	return alts
 }
 
-// GetLiveSchema builds a schema by querying the column families that exist in the connected
-// keyspace.
+// GetLiveSchema builds a schema by querying the column families that exist in the current keyspace
+// of the given cluster.
 func GetLiveSchema(c Cluster) (*Schema, error) {
 	var err error
 	tables, nextTypeID, err := getLiveColumnFamilies(c, c.GetKeyspace())

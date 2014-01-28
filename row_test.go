@@ -92,7 +92,7 @@ func (t *marshalTestTable) CF() *ColumnFamily {
 
 func TestReflectedMarshalAndUnmarshal(t *testing.T) {
 	model := struct{ T *marshalTestTable }{}
-	ReflectSchemaFrom(&model)
+	ReflectSchema(&model)
 	cf := model.T.ColumnFamily
 	g := testSeqIDGenerator(36 * 36 * 36) // "1000" in base-36
 	cf.SeqIDGenerator = &g

@@ -13,7 +13,7 @@ type Schema struct {
 	nextTypeID    int
 }
 
-// NewSchema returns a new, empty schema.
+// NewSchema returns an empty, unbound schema.
 func NewSchema() *Schema {
 	return &Schema{
 		CFs:        make(Keyspace),
@@ -31,6 +31,11 @@ func (s *Schema) AddCF(cf *ColumnFamily) {
 	}
 }
 
+// DialCassandra uses gocql to connect to a Cassandra cluster and binds this schema to it.
+//
+// Upon connecting, the live schema is automatically scanned and compared to this one. The
+// difference between the two will be available in the SchemaUpdates field, and the
+// RequiresUpdates method will be able to report on whether a difference exists.
 func (s *Schema) DialCassandra(config CassandraConfig) error {
 	cluster, err := DialCassandra(config)
 	if err != nil {
@@ -41,23 +46,41 @@ func (s *Schema) DialCassandra(config CassandraConfig) error {
 	return err
 }
 
-// RequiresUpdates returns true if the Orm model differs from the existing column families in
-// Cassandra.
+// RequiresUpdates returns true if this schema differs from the existing column families in the
+// connected cluster.
 func (s *Schema) RequiresUpdates() bool {
 	return s.SchemaUpdates.Size() > 0
 }
 
-// ApplySchemaUpdates applies any required modifications to the live schema to match the Orm model.
+// ApplySchemaUpdates applies any required modifications to the live schema to match this one.
 func (s *Schema) ApplySchemaUpdates() error {
 	return s.SchemaUpdates.Apply(s.Cluster)
 }
 
-// IsBound returns true if the schema is bound to an *Orm.
+// IsBound returns true if the schema is bound to a Cluster.
 func (s *Schema) IsBound() bool {
 	return s.Cluster != nil
 }
 
-func ReflectSchemaFrom(model interface{}) *Schema {
+// ReflectSchema uses reflection to derive a schema from the fields of a given struct.
+//
+// The returned schema will include a column family for each exported field of CFProvider type.
+// The name of the column family will be the lowercased name of the corresponding field.
+//
+// CFProvider fields that are nil pointers will be initialized with a new value. They must be
+// capable of producing their column family definition from a zero value.
+//
+//       type User struct {Name string, Password string}
+//       type UserTable struct {*ibis.ColumnFamily}
+//       func (t *UserTable) CF() *ibis.ColumnFamily {
+//           t.ColumnFamily = ibis.ReflectColumnFamily(User{})
+//           return t.Key("Name")
+//       }
+//       type Model struct{Users *UserTable}
+//       model := &Model{}
+//       schema := ibis.ReflectSchemaFrom(model)
+//
+func ReflectSchema(model interface{}) *Schema {
 	ptr_type := reflect.TypeOf(model)
 	if ptr_type.Kind() != reflect.Ptr {
 		panic("model must be pointer to struct")
