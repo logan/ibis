@@ -15,6 +15,9 @@ var (
 	ErrNothingToCommit = errors.New("nothing to commit")
 )
 
+// A type of function that produces CQL statements to execute before committing data.
+type PrecommitHook func(interface{}) ([]CQL, error)
+
 // CFProvider is an interface for producing and configuring a column family definition. Use
 // CFProvider when specifying a schema struct for ReflectSchema(). Exported fields that implement
 // this interface will be included in the resulting schema.
@@ -30,11 +33,13 @@ type ColumnFamily struct {
 	Columns    []Column // The definition of the column family's columns.
 	PrimaryKey []string
 	SeqIDGenerator
-	*Schema
+	Cluster
 
+	schema *Schema
 	typeID int
 	*rowReflector
-	provisions []reflect.Value
+	provisions     []reflect.Value
+	precommitHooks []PrecommitHook
 }
 
 // CF returns a pointer to the column family it's called on. This is so *ColumnFamily implements
@@ -43,14 +48,7 @@ func (cf *ColumnFamily) CF() *ColumnFamily {
 	return cf
 }
 
-// Cluster returns an object implementing the Cluster interface, or nil if this column family has
-// not been added to a schema that is connected to a cluster.
-func (cf *ColumnFamily) Cluster() Cluster {
-	if cf.Schema == nil {
-		return nil
-	}
-	return cf.Schema.Cluster
-}
+func (cf *ColumnFamily) Schema() *Schema { return cf.schema }
 
 // Key configures the primary key for this column family. It takes names of columns as strings.
 // At least one argument is required, specifying the partition key. Zero or more additional
@@ -84,6 +82,14 @@ func (cf *ColumnFamily) Key(keys ...string) *ColumnFamily {
 	return cf
 }
 
+// Precommit adds a hook to the column family's list of precommit hooks.
+func (t *ColumnFamily) Precommit(hook PrecommitHook) *ColumnFamily {
+	if t.precommitHooks == nil {
+		t.precommitHooks = append(t.precommitHooks, hook)
+	}
+	return t
+}
+
 // CreateStatement returns the CQL statement that would create this table.
 func (t *ColumnFamily) CreateStatement() CQL {
 	var b CQLBuilder
@@ -96,7 +102,7 @@ func (t *ColumnFamily) CreateStatement() CQL {
 		b.Append(fmt.Sprintf(" WITH comment='%d'", t.typeID))
 	}
 	cql := b.CQL()
-	cql.Cluster(t.Cluster())
+	cql.Cluster(t.Cluster)
 	return cql
 }
 
@@ -195,7 +201,7 @@ func (cf *ColumnFamily) GetProvider(dest interface{}) bool {
 
 // IsBound returns true if the column family is part of a schema that is connected to a cluster.
 func (cf *ColumnFamily) IsBound() bool {
-	return cf.Cluster() != nil
+	return cf.Cluster != nil
 }
 
 // Exists returns true if a row can be found in the column family with the given primary key.
@@ -302,13 +308,27 @@ func (cf *ColumnFamily) MakeCommitCAS(row interface{}) (CQL, error) {
 	return cql, nil
 }
 
-func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
-	// Generate the appropriate CQL.
-	selectedKeys := make([]string, len(cf.Columns))
-	for i, col := range cf.Columns {
-		selectedKeys[i] = col.Name
+func (cf *ColumnFamily) applyPrecommitHooks(row interface{}) ([]CQL, error) {
+	total := make([]CQL, 0)
+	if cf.precommitHooks != nil {
+		for _, hook := range cf.precommitHooks {
+			cqls, err := hook(row)
+			if err != nil {
+				return nil, err
+			}
+			total = append(total, cqls...)
+		}
 	}
+	return total, nil
+}
+
+func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
+	// TODO: make the cas path more separate?
 	if cas {
+		selectedKeys := make([]string, len(cf.Columns))
+		for i, col := range cf.Columns {
+			selectedKeys[i] = col.Name
+		}
 		ins := InsertInto(cf).
 			Keys(selectedKeys...).
 			Values(mmap.InterfacesFor(selectedKeys...)...).
@@ -316,11 +336,16 @@ func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, o
 		cql = ins.CQL()
 		ok = true
 	} else {
-		// For an update, it makes no sense to treat primary keys as dirty.
+		var selectedKeys []string
+		// If any primary keys are dirty, invalidate the entire object.
 		for _, k := range cf.PrimaryKey {
-			mmap[k].Dirty = false
+			if mmap[k].Dirty {
+				selectedKeys = mmap.Keys()
+			}
 		}
-		selectedKeys = mmap.DirtyKeys()
+		if selectedKeys == nil {
+			selectedKeys = mmap.DirtyKeys()
+		}
 		if len(selectedKeys) > 0 {
 			upd := Update(cf)
 			for _, k := range selectedKeys {
@@ -342,6 +367,19 @@ func (cf *ColumnFamily) commit(row interface{}, cas bool) error {
 		return err
 	}
 
+	// Generate CQL from precommit hooks and execute it in a batch.
+	// TODO: Include commit in the same batch.
+	cqls, err := cf.applyPrecommitHooks(row)
+	if err != nil {
+		return err
+	}
+	if len(cqls) > 0 {
+		if err := cf.Cluster.Query(cqls...).Exec(); err != nil {
+			return err
+		}
+	}
+
+	// Generate CQL for commit.
 	cql, ok := cf.generateCommit(mmap, cas)
 	if !ok {
 		return nil

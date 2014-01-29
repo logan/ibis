@@ -21,7 +21,7 @@ func newTestModel(t *testing.T) *testModel {
 		lastSeqID: new(ibis.FakeSeqIDGenerator).Set(36*36*36 - 1),
 	}
 	schema := ibis.ReflectSchema(model)
-	schema.Cluster = model.cluster
+	schema.SetCluster(model.cluster)
 	// set up seqid sequence to be 1000, 1001, 1002, ...
 	model.Indexes.SeqIDGenerator = model.lastSeqID
 

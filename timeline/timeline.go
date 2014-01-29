@@ -43,6 +43,7 @@ func (idx *Index) MakeAdd(seqid ibis.SeqID, v interface{}) (ibis.CQL, error) {
 	}
 	entry := &Entry{SeqID: seqid.Pad(), Bytes: enc}
 	entry.encodePartition(idx.Name)
+	// TODO: write with timestamp
 	return idx.Table.MakeCommit(entry)
 }
 

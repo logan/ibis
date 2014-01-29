@@ -1,5 +1,6 @@
 package ibis
 
+import "errors"
 import "fmt"
 import "reflect"
 import "testing"
@@ -61,25 +62,41 @@ func (t *crudTable) CF() *ColumnFamily {
 
 func (t *crudTable) crud() *crudTable { return t }
 
+type crudIndexRow struct {
+	Partition string
+	// TODO: test a counter here
+}
+
+type crudIndexTable struct {
+	*ColumnFamily
+}
+
+func (t *crudIndexTable) CF() *ColumnFamily {
+	t.ColumnFamily = ReflectColumnFamily(crudIndexRow{})
+	return t.ColumnFamily.Key("Partition")
+}
+
 type crudModel struct {
 	*crudTable
+	*crudIndexTable
+	*Schema
 }
 
 func (m *crudModel) Close() {
-	m.crudTable.ColumnFamily.Cluster().Close()
+	m.crudTable.ColumnFamily.Cluster.Close()
 }
 
 func newCrudModel(t *testing.T) *crudModel {
 	cluster := NewTestConn(t)
 	model := &crudModel{}
-	schema := ReflectSchema(model)
-	schema.Cluster = cluster
+	model.Schema = ReflectSchema(model)
+	model.Schema.SetCluster(cluster)
 
 	var err error
-	if schema.SchemaUpdates, err = DiffLiveSchema(cluster, schema); err != nil {
+	if model.Schema.SchemaUpdates, err = DiffLiveSchema(cluster, model.Schema); err != nil {
 		t.Fatal(err)
 	}
-	if err = schema.ApplySchemaUpdates(); err != nil {
+	if err = model.Schema.ApplySchemaUpdates(); err != nil {
 		t.Fatal(err)
 	}
 	return model
@@ -159,10 +176,48 @@ func TestProvisioning(t *testing.T) {
 	model.crudTable.Provide(crudProvider(model.crudTable))
 
 	var p crudProvider
-	if !model.GetProvider(&p) {
+	if !model.Schema.GetProvider(&p) {
 		t.Fatal("GetProvider returned false")
 	}
 	if p.crud() != model.crudTable {
 		t.Fatalf("crudProvider returned something unexpected: %v vs. %v", p.crud(), model.crudTable)
+	}
+}
+
+func TestPrecommitHooks(t *testing.T) {
+	model := newCrudModel(t)
+	defer model.Close()
+
+	partErr := errors.New("partErr")
+	hook := func(row interface{}) ([]CQL, error) {
+		crud := row.(*crudRow)
+		if crud.Partition == "" {
+			return nil, partErr
+		}
+		entry := &crudIndexRow{Partition: crud.Partition}
+		cql, err := model.crudIndexTable.MakeCommit(entry)
+		if err != nil {
+			return nil, err
+		}
+		return []CQL{cql}, nil
+	}
+	model.crudTable.Precommit(hook)
+
+	crud := crudRow{Partition: "P1", Cluster: 0, Value: "P1-0"}
+	if err := model.crudTable.CommitCAS(&crud); err != nil {
+		t.Fatal(err)
+	}
+
+	entry := &crudIndexRow{}
+	if err := model.crudIndexTable.LoadByKey(entry, "P1"); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Partition != "P1" {
+		t.Errorf("expected entry with partition P1, got: %+v", entry.Partition)
+	}
+
+	crud = crudRow{}
+	if err := model.crudTable.Commit(&crud); err != partErr {
+		t.Error("expected partErr, got", err)
 	}
 }
