@@ -1,6 +1,9 @@
 package timeline
 
+import "errors"
 import "encoding/json"
+import "fmt"
+import "reflect"
 import "strings"
 
 import "github.com/logan/ibis"
@@ -76,10 +79,13 @@ type EntryChannel chan *Entry
 
 type IndexScanner struct {
 	EntryChannel
-	since ibis.SeqID
-	index *Index
-	query ibis.CFQuery
-	err   error
+	since     ibis.SeqID
+	fetched   int
+	limit     int
+	index     *Index
+	query     ibis.CFQuery
+	exhausted bool
+	err       error
 }
 
 func NewIndexScanner(index *Index) *IndexScanner {
@@ -87,11 +93,17 @@ func NewIndexScanner(index *Index) *IndexScanner {
 	return scanner
 }
 
-func (scanner *IndexScanner) Since(seqid ibis.SeqID) {
+func (scanner *IndexScanner) Since(seqid ibis.SeqID) *IndexScanner {
 	if seqid != "" {
 		seqid = seqid.Pad()
 	}
 	scanner.since = seqid
+	return scanner
+}
+
+func (scanner *IndexScanner) Limit(limit int) *IndexScanner {
+	scanner.limit = limit
+	return scanner
 }
 
 func (scanner *IndexScanner) Start() EntryChannel {
@@ -99,6 +111,7 @@ func (scanner *IndexScanner) Start() EntryChannel {
 		close(scanner.EntryChannel)
 	}
 	scanner.EntryChannel = make(EntryChannel)
+	scanner.fetched = 0
 	go scanner.scan()
 	return scanner.EntryChannel
 }
@@ -117,11 +130,14 @@ func (scanner *IndexScanner) start() ibis.CFQuery {
 			scanner.err = err
 		}
 	}
-	q := ibis.Select().From(scanner.index.Table.ColumnFamily).
+	cql := ibis.Select().From(scanner.index.Table.ColumnFamily).
 		Where("Partition = ?", scanner.index.Name).
 		Where("SeqID < ?", scanner.since).
-		OrderBy("SeqID DESC").
-		Query()
+		OrderBy("SeqID DESC")
+	if scanner.limit != 0 {
+		cql.Limit(scanner.limit)
+	}
+	q := cql.Query()
 	return scanner.index.Table.Scanner(q)
 }
 
@@ -137,4 +153,36 @@ func (scanner *IndexScanner) scan() {
 		scanner.since = entry.SeqID
 		scanner.EntryChannel <- entry
 	}
+}
+
+func (scanner *IndexScanner) ScanPage(x interface{}) bool {
+	if scanner.exhausted || scanner.err != nil {
+		return false
+	}
+	ptrType := reflect.TypeOf(x)
+	if ptrType.Kind() != reflect.Ptr || ptrType.Elem().Kind() != reflect.Slice {
+		scanner.err = errors.New(fmt.Sprintf("ScanPage needs pointer to slice, not %T", ptrType))
+		return false
+	}
+	sliceType := ptrType.Elem()
+	ptrValue := reflect.ValueOf(x)
+	sliceValue := ptrValue.Elem()
+	var sliceSize int
+	if sliceValue.IsNil() {
+		sliceSize = 1000
+		sliceValue.Set(reflect.MakeSlice(sliceType, 0, sliceSize))
+	} else {
+		sliceSize = sliceValue.Cap()
+		sliceValue.SetLen(0)
+	}
+	for i := 0; i < sliceSize && scanner.err == nil; i++ {
+		row, ok := <-scanner.EntryChannel
+		if !ok {
+			scanner.exhausted = true
+			return i > 0
+		}
+		sliceValue.SetLen(i + 1)
+		sliceValue.Index(i).Set(reflect.ValueOf(row))
+	}
+	return scanner.err == nil
 }

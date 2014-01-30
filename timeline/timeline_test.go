@@ -36,13 +36,17 @@ func newTestModel(t *testing.T) *testModel {
 }
 
 func scanAllEntries(idx *Index, since ...string) ([]*Entry, error) {
-	entries := make([]*Entry, 0)
 	scanner := idx.Scanner()
 	if len(since) > 0 {
 		scanner.Since(ibis.SeqID(since[0]))
 	}
-	for entry := range scanner.Start() {
-		entries = append(entries, entry)
+	// read in two at a time
+	//entries := make([]*Entry, 0)
+	var entries []*Entry
+	page := make([]*Entry, 0, 2)
+	scanner.Start()
+	for scanner.ScanPage(&page) {
+		entries = append(entries, page...)
 	}
 	return entries, scanner.Error()
 }
@@ -53,7 +57,7 @@ func checkEntries(entries []*Entry, seqids ...string) (string, bool) {
 		received[i] = entry.SeqID
 	}
 	if len(received) != len(seqids) {
-		return fmt.Sprintf("expected %d entries, receied %d: %s", len(seqids), len(received),
+		return fmt.Sprintf("expected %d entries, received %d: %s", len(seqids), len(received),
 			received), false
 	}
 	for i, seqid := range received {
