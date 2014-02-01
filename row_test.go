@@ -82,18 +82,18 @@ type marshalTestRow struct {
 }
 
 type marshalTestTable struct {
-	*ColumnFamily
+	*CF
 }
 
-func (t *marshalTestTable) CF() *ColumnFamily {
-	t.ColumnFamily = ReflectColumnFamily(marshalTestRow{})
-	return t.ColumnFamily
+func (t *marshalTestTable) NewCF() *CF {
+	t.CF = ReflectCF(marshalTestRow{})
+	return t.CF
 }
 
 func TestReflectedMarshalAndUnmarshal(t *testing.T) {
 	model := struct{ T *marshalTestTable }{}
 	ReflectSchema(&model)
-	cf := model.T.ColumnFamily
+	cf := model.T.cf
 	g := FakeSeqIDGenerator(36 * 36 * 36) // "1000" in base-36
 	cf.SeqIDGenerator = &g
 

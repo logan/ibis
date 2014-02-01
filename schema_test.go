@@ -9,17 +9,17 @@ type row struct {
 }
 
 type table struct {
-	*ColumnFamily
+	*CF
 }
 
-func (t *table) CF() *ColumnFamily {
-	t.ColumnFamily = ReflectColumnFamily(row{})
-	return t.ColumnFamily.Key("Str")
+func (t *table) NewCF() *CF {
+	t.CF = ReflectCF(row{})
+	return t.cf.Key("Str")
 }
 
 func TestReflectSchema(t *testing.T) {
 	type model struct {
-		Defined    *ColumnFamily
+		Defined    *CF
 		Reflected  *table
 		unexported *table // having this here shouldn't break anything
 	}
@@ -29,7 +29,7 @@ func TestReflectSchema(t *testing.T) {
 		Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
 	}
 	m := &model{}
-	m.Defined = &ColumnFamily{Columns: expectedColumns}
+	m.Defined = &CF{Columns: expectedColumns}
 	m.Defined.Key("Str")
 	t.Logf("m.Defined.Columns = %+v", m.Defined.Columns)
 	schema := ReflectSchema(m)

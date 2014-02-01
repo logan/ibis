@@ -30,7 +30,7 @@ func TestGetLiveSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expected := ColumnFamily{
+	expected := CF{
 		Name: "test",
 		Columns: []Column{
 			Column{Name: "blobcol", Type: "blob"},
@@ -68,7 +68,7 @@ func TestDiffLiveSchema(t *testing.T) {
 
 	model := &Schema{
 		CFs: Keyspace{
-			"T1": &ColumnFamily{
+			"T1": &CF{
 				Name: "T1",
 				Columns: []Column{
 					Column{Name: "A", Type: "varchar"},
@@ -80,7 +80,7 @@ func TestDiffLiveSchema(t *testing.T) {
 	}
 	model.CFs["T1"].Key("A")
 
-	expected := &SchemaDiff{creations: []*ColumnFamily{model.CFs["T1"]}}
+	expected := &SchemaDiff{creations: []*CF{model.CFs["T1"]}}
 	diff, err = DiffLiveSchema(cluster, model)
 	if err != nil {
 		t.Fatal(err)
@@ -95,13 +95,13 @@ func TestDiffLiveSchema(t *testing.T) {
 
 	model.CFs["T1"].Columns[1].Type = "blob"
 	model.CFs["T1"].Columns = append(model.CFs["T1"].Columns, Column{Name: "C", Type: "bigint"})
-	model.CFs["T2"] = &ColumnFamily{
+	model.CFs["T2"] = &CF{
 		Name:    "T2",
 		Columns: []Column{Column{Name: "X", Type: "varchar"}},
 	}
 	model.CFs["T2"].Key("X")
 	expected = &SchemaDiff{
-		creations: []*ColumnFamily{model.CFs["T2"]},
+		creations: []*CF{model.CFs["T2"]},
 		alterations: []tableAlteration{
 			tableAlteration{
 				TableName:      "T1",

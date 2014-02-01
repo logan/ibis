@@ -3,7 +3,7 @@ package ibis
 import "reflect"
 import "strings"
 
-type Keyspace map[string]*ColumnFamily
+type Keyspace map[string]*CF
 
 // Schema is a map of column families by name, defining a keyspace.
 type Schema struct {
@@ -22,7 +22,7 @@ func NewSchema() *Schema {
 }
 
 // AddCF adds a column family definition to the schema.
-func (s *Schema) AddCF(cf *ColumnFamily) {
+func (s *Schema) AddCF(cf *CF) {
 	s.CFs[strings.ToLower(cf.Name)] = cf
 	cf.schema = s
 	cf.Cluster = s.Cluster
@@ -94,9 +94,9 @@ func (s *Schema) IsBound() bool {
 // capable of producing their column family definition from a zero value.
 //
 //       type User struct {Name string, Password string}
-//       type UserTable struct {*ibis.ColumnFamily}
-//       func (t *UserTable) CF() *ibis.ColumnFamily {
-//           t.ColumnFamily = ibis.ReflectColumnFamily(User{})
+//       type UserTable struct {*ibis.CF}
+//       func (t *UserTable) CF() *ibis.CF {
+//           t.CF = ibis.ReflectCF(User{})
 //           return t.Key("Name")
 //       }
 //       type Model struct{Users *UserTable}
@@ -131,7 +131,7 @@ func ReflectSchema(model interface{}) *Schema {
 					field_value.Set(reflect.New(field.Type.Elem()))
 					provider = field_value.Interface().(CFProvider)
 				}
-				cf := provider.CF()
+				cf := provider.NewCF()
 				cf.Name = strings.ToLower(field.Name)
 				if cf.rowReflector != nil {
 					cf.fillFromRowType(cf.rowReflector.rowType.Elem())

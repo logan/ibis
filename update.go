@@ -6,7 +6,7 @@ import "strings"
 
 // SchemaDiff enumerates the changes necessary to transform one schema into another.
 type SchemaDiff struct {
-	creations   []*ColumnFamily   // tables that are completely missing from the former schema
+	creations   []*CF             // tables that are completely missing from the former schema
 	alterations []tableAlteration // tables that have missing or altered columns
 }
 
@@ -94,7 +94,7 @@ func GetLiveSchema(c Cluster) (*Schema, error) {
 	for _, t := range tables {
 		schema.CFs[strings.ToLower(t.Name)] = t
 	}
-	cf := &ColumnFamily{Name: "system.schema_columns"}
+	cf := &CF{Name: "system.schema_columns"}
 	sel := Select("columnfamily_name", "column_name", "validator").
 		From(cf).Where("keyspace_name = ?", c.GetKeyspace())
 	cql := sel.CQL()
@@ -115,18 +115,18 @@ func GetLiveSchema(c Cluster) (*Schema, error) {
 	return &schema, qiter.Close()
 }
 
-func getLiveColumnFamilies(cluster Cluster, keyspace string) ([]*ColumnFamily, int, error) {
-	cf := &ColumnFamily{Name: "system.schema_columnfamilies"}
+func getLiveColumnFamilies(cluster Cluster, keyspace string) ([]*CF, int, error) {
+	cf := &CF{Name: "system.schema_columnfamilies"}
 	sel := Select("columnfamily_name", "key_aliases", "column_aliases", "comment").
 		From(cf).Where("keyspace_name = ?", keyspace)
 	cql := sel.CQL()
 	cql.Cluster(cluster)
 	qiter := cql.Query()
-	tables := make([]*ColumnFamily, 0, 32)
+	tables := make([]*CF, 0, 32)
 	var cf_name, key_aliases, column_aliases, comment string
 	maxTypeID := 0
 	for qiter.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
-		t := ColumnFamily{Name: cf_name, Columns: make([]Column, 0, 16)}
+		t := CF{Name: cf_name, Columns: make([]Column, 0, 16)}
 		t.Key(keyFromAliases(key_aliases, column_aliases)...)
 		t.typeID = typeIDFromComment(comment)
 		if t.typeID > maxTypeID {
@@ -182,7 +182,7 @@ func DiffLiveSchema(c Cluster, model *Schema) (*SchemaDiff, error) {
 			model_t.typeID = t.typeID
 		}
 	}
-	var diff = &SchemaDiff{make([]*ColumnFamily, 0), make([]tableAlteration, 0)}
+	var diff = &SchemaDiff{make([]*CF, 0), make([]tableAlteration, 0)}
 	for name, model_table := range model.CFs {
 		live_table, ok := live.CFs[strings.ToLower(name)]
 		if ok {

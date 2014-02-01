@@ -211,17 +211,17 @@ func (v *MarshalledValue) cmp(w *MarshalledValue) (int, error) {
 
 // A Row is capable of pointing to its column family and marshalling/unmarshalling itself.
 type Row interface {
-	CF() *ColumnFamily
+	CF() *CF
 	Marshal(MarshalledMap) error
 	Unmarshal(MarshalledMap) error
 }
 
 type rowReflector struct {
-	cf      *ColumnFamily
+	cf      *CF
 	rowType reflect.Type
 }
 
-func newRowReflector(cf *ColumnFamily, template interface{}) *rowReflector {
+func newRowReflector(cf *CF, template interface{}) *rowReflector {
 	return &rowReflector{cf: cf, rowType: reflect.PtrTo(reflect.TypeOf(template))}
 }
 
@@ -234,11 +234,11 @@ func (s *rowReflector) reflectedRow(x interface{}) (Row, error) {
 }
 
 type reflectedRow struct {
-	cf    *ColumnFamily
+	cf    *CF
 	value reflect.Value
 }
 
-func (rr *reflectedRow) CF() *ColumnFamily {
+func (rr *reflectedRow) CF() *CF {
 	return rr.cf
 }
 

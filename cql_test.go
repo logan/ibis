@@ -8,7 +8,7 @@ func TestCQL(t *testing.T) {
 		return fmt.Sprintf("\nexpected: '%s'\nreceived: '%s'", exp, sel), exp == sel.String()
 	}
 
-	cf := &ColumnFamily{
+	cf := &CF{
 		Name: "Table",
 		Columns: []Column{
 			Column{Name: "X"},

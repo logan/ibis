@@ -17,7 +17,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 		SeqID  SeqID
 	}
 
-	cf := &ColumnFamily{Name: "test"}
+	cf := &CF{Name: "test"}
 	cf.fillFromRowType(reflect.TypeOf(table{}))
 	cf.Key("Str")
 
@@ -52,12 +52,12 @@ type crudRow struct {
 }
 
 type crudTable struct {
-	*ColumnFamily
+	*CF
 }
 
-func (t *crudTable) CF() *ColumnFamily {
-	t.ColumnFamily = ReflectColumnFamily(crudRow{})
-	return t.ColumnFamily.Key("Partition", "Cluster")
+func (t *crudTable) NewCF() *CF {
+	t.CF = ReflectCF(crudRow{})
+	return t.cf.Key("Partition", "Cluster")
 }
 
 func (t *crudTable) crud() *crudTable { return t }
@@ -68,12 +68,12 @@ type crudIndexRow struct {
 }
 
 type crudIndexTable struct {
-	*ColumnFamily
+	*CF
 }
 
-func (t *crudIndexTable) CF() *ColumnFamily {
-	t.ColumnFamily = ReflectColumnFamily(crudIndexRow{})
-	return t.ColumnFamily.Key("Partition")
+func (t *crudIndexTable) NewCF() *CF {
+	t.CF = ReflectCF(crudIndexRow{})
+	return t.CF.Key("Partition")
 }
 
 type crudModel struct {
@@ -83,7 +83,7 @@ type crudModel struct {
 }
 
 func (m *crudModel) Close() {
-	m.crudTable.ColumnFamily.Cluster.Close()
+	m.crudTable.cf.Cluster.Close()
 }
 
 func newCrudModel(t *testing.T) *crudModel {

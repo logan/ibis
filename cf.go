@@ -22,13 +22,12 @@ type PrecommitHook func(interface{}) ([]CQL, error)
 // CFProvider when specifying a schema struct for ReflectSchema(). Exported fields that implement
 // this interface will be included in the resulting schema.
 type CFProvider interface {
-	CF() *ColumnFamily
+	NewCF() *CF
 }
 
-// A ColumnFamily describes how rows of a table are stored in Cassandra. If added to a Schema that
-// is connected to a Cluster, then operations on the corresponding column family in the cluster may
-// be made by calling ColumnFamily methods like LoadByKey, Commit, etc.
-type ColumnFamily struct {
+// CF describes how rows of a column family (table) are stored in Cassandra. If connected to a
+// live schema, then operations on a column family may be made through methods on this type.
+type CF struct {
 	Name       string   // The name of the column family.
 	Columns    []Column // The definition of the column family's columns.
 	PrimaryKey []string
@@ -42,13 +41,13 @@ type ColumnFamily struct {
 	precommitHooks []PrecommitHook
 }
 
-// CF returns a pointer to the column family it's called on. This is so *ColumnFamily implements
-// the CFProvider interface, allowing CF definitions to be given in a reflected schema.
-func (cf *ColumnFamily) CF() *ColumnFamily {
+// CF returns a pointer to the column family it's called on. This is so *CF implements the
+// CFProvider interface.
+func (cf *CF) NewCF() *CF {
 	return cf
 }
 
-func (cf *ColumnFamily) Schema() *Schema { return cf.schema }
+func (cf *CF) Schema() *Schema { return cf.schema }
 
 // Key configures the primary key for this column family. It takes names of columns as strings.
 // At least one argument is required, specifying the partition key. Zero or more additional
@@ -56,7 +55,7 @@ func (cf *ColumnFamily) Schema() *Schema { return cf.schema }
 //
 // Key returns a pointer to the column family it was called on so it can be chained during
 // configuration.
-func (cf *ColumnFamily) Key(keys ...string) *ColumnFamily {
+func (cf *CF) Key(keys ...string) *CF {
 	cf.PrimaryKey = keys
 
 	// primary key columns must come first and in order
@@ -83,26 +82,26 @@ func (cf *ColumnFamily) Key(keys ...string) *ColumnFamily {
 }
 
 // Precommit adds a hook to the column family's list of precommit hooks.
-func (t *ColumnFamily) Precommit(hook PrecommitHook) *ColumnFamily {
-	if t.precommitHooks == nil {
-		t.precommitHooks = append(t.precommitHooks, hook)
+func (cf *CF) Precommit(hook PrecommitHook) *CF {
+	if cf.precommitHooks == nil {
+		cf.precommitHooks = append(cf.precommitHooks, hook)
 	}
-	return t
+	return cf
 }
 
 // CreateStatement returns the CQL statement that would create this table.
-func (t *ColumnFamily) CreateStatement() CQL {
+func (cf *CF) CreateStatement() CQL {
 	var b CQLBuilder
-	b.Append("CREATE TABLE " + t.Name + " (")
-	for _, col := range t.Columns {
+	b.Append("CREATE TABLE " + cf.Name + " (")
+	for _, col := range cf.Columns {
 		b.Append(col.Name + " " + col.Type + ", ")
 	}
-	b.Append("PRIMARY KEY (" + strings.Join(t.PrimaryKey, ", ") + "))")
-	if t.typeID != 0 {
-		b.Append(fmt.Sprintf(" WITH comment='%d'", t.typeID))
+	b.Append("PRIMARY KEY (" + strings.Join(cf.PrimaryKey, ", ") + "))")
+	if cf.typeID != 0 {
+		b.Append(fmt.Sprintf(" WITH comment='%d'", cf.typeID))
 	}
 	cql := b.CQL()
-	cql.Cluster(t.Cluster)
+	cql.Cluster(cf.Cluster)
 	return cql
 }
 
@@ -114,7 +113,7 @@ type Column struct {
 	typeInfo *gocql.TypeInfo
 }
 
-func (cf *ColumnFamily) fillFromRowType(row_type reflect.Type) {
+func (cf *CF) fillFromRowType(row_type reflect.Type) {
 	if row_type.Kind() != reflect.Struct {
 		panic("row must be struct")
 	}
@@ -158,7 +157,7 @@ func goTypeToCassType(t reflect.Type) (string, bool) {
 }
 
 // Provide associates an interface with the column family for lookup with GetProvider.
-func (cf *ColumnFamily) Provide(x interface{}) {
+func (cf *CF) Provide(x interface{}) {
 	if cf.provisions == nil {
 		cf.provisions = make([]reflect.Value, 0)
 	}
@@ -177,7 +176,7 @@ func (cf *ColumnFamily) Provide(x interface{}) {
 //          logger.Log("it works!")
 //        }
 //
-func (cf *ColumnFamily) GetProvider(dest interface{}) bool {
+func (cf *CF) GetProvider(dest interface{}) bool {
 	destPtrType := reflect.TypeOf(dest)
 	if destPtrType.Kind() != reflect.Ptr {
 		panic("destination must be a pointer to an interface")
@@ -200,14 +199,14 @@ func (cf *ColumnFamily) GetProvider(dest interface{}) bool {
 }
 
 // IsBound returns true if the column family is part of a schema that is connected to a cluster.
-func (cf *ColumnFamily) IsBound() bool {
+func (cf *CF) IsBound() bool {
 	return cf.Cluster != nil
 }
 
 // Exists returns true if a row can be found in the column family with the given primary key.
 // The values for the key must be given in order respective to the primary key definition for this
 // column family (see the Key function).
-func (cf *ColumnFamily) Exists(key ...interface{}) (bool, error) {
+func (cf *CF) Exists(key ...interface{}) (bool, error) {
 	if !cf.IsBound() {
 		return false, ErrTableNotBound
 	}
@@ -231,7 +230,7 @@ func (cf *ColumnFamily) Exists(key ...interface{}) (bool, error) {
 // The values for the key must be given in order respective to the primary key definition for this
 // column family (see the Key function). If no row is found under the given key, ErrNotFound is
 // returned.
-func (cf *ColumnFamily) LoadByKey(dest interface{}, key ...interface{}) error {
+func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 	if !cf.IsBound() {
 		return ErrTableNotBound
 	}
@@ -262,7 +261,7 @@ func (cf *ColumnFamily) LoadByKey(dest interface{}, key ...interface{}) error {
 // The row argument should implement the Row interface. Alternatively, if this column family was
 // generated by reflection, then the row argument may be a pointer to a value of the same type that
 // was reflected.
-func (cf *ColumnFamily) CommitCAS(row interface{}) error {
+func (cf *CF) CommitCAS(row interface{}) error {
 	if !cf.IsBound() {
 		return ErrTableNotBound
 	}
@@ -276,7 +275,7 @@ func (cf *ColumnFamily) CommitCAS(row interface{}) error {
 // The row argument should implement the Row interface. Alternatively, if this column family was
 // generated by reflection, then the row argument may be a pointer to a value of the same type that
 // was reflected.
-func (cf *ColumnFamily) Commit(row interface{}) error {
+func (cf *CF) Commit(row interface{}) error {
 	if !cf.IsBound() {
 		return ErrTableNotBound
 	}
@@ -286,7 +285,7 @@ func (cf *ColumnFamily) Commit(row interface{}) error {
 
 // MakeCommit returns the CQL statement that would commit the given row. ErrNothingToCommit may be
 // returned.
-func (cf *ColumnFamily) MakeCommit(row interface{}) (CQL, error) {
+func (cf *CF) MakeCommit(row interface{}) (CQL, error) {
 	mmap, err := cf.marshal(row)
 	if err != nil {
 		return CQL{}, err
@@ -299,7 +298,7 @@ func (cf *ColumnFamily) MakeCommit(row interface{}) (CQL, error) {
 }
 
 // MakeCommitCAS returns the CQL statement that would CAS-commit the given row.
-func (cf *ColumnFamily) MakeCommitCAS(row interface{}) (CQL, error) {
+func (cf *CF) MakeCommitCAS(row interface{}) (CQL, error) {
 	mmap, err := cf.marshal(row)
 	if err != nil {
 		return CQL{}, err
@@ -308,7 +307,7 @@ func (cf *ColumnFamily) MakeCommitCAS(row interface{}) (CQL, error) {
 	return cql, nil
 }
 
-func (cf *ColumnFamily) applyPrecommitHooks(row interface{}) ([]CQL, error) {
+func (cf *CF) applyPrecommitHooks(row interface{}) ([]CQL, error) {
 	total := make([]CQL, 0)
 	if cf.precommitHooks != nil {
 		for _, hook := range cf.precommitHooks {
@@ -322,7 +321,7 @@ func (cf *ColumnFamily) applyPrecommitHooks(row interface{}) ([]CQL, error) {
 	return total, nil
 }
 
-func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
+func (cf *CF) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
 	// TODO: make the cas path more separate?
 	if cas {
 		selectedKeys := make([]string, len(cf.Columns))
@@ -361,7 +360,7 @@ func (cf *ColumnFamily) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, o
 	return
 }
 
-func (cf *ColumnFamily) commit(row interface{}, cas bool) error {
+func (cf *CF) commit(row interface{}, cas bool) error {
 	mmap, err := cf.marshal(row)
 	if err != nil {
 		return err
@@ -415,7 +414,7 @@ func (cf *ColumnFamily) commit(row interface{}, cas bool) error {
 	return cf.unmarshal(row, mmap)
 }
 
-func (cf *ColumnFamily) marshal(src interface{}) (MarshalledMap, error) {
+func (cf *CF) marshal(src interface{}) (MarshalledMap, error) {
 	row, ok := src.(Row)
 	if !ok {
 		if cf.rowReflector == nil {
@@ -434,7 +433,7 @@ func (cf *ColumnFamily) marshal(src interface{}) (MarshalledMap, error) {
 	return mmap, nil
 }
 
-func (cf *ColumnFamily) unmarshal(dest interface{}, mmap MarshalledMap) error {
+func (cf *CF) unmarshal(dest interface{}, mmap MarshalledMap) error {
 	row, ok := dest.(Row)
 	if !ok {
 		if cf.rowReflector == nil {
@@ -449,12 +448,12 @@ func (cf *ColumnFamily) unmarshal(dest interface{}, mmap MarshalledMap) error {
 	return row.Unmarshal(mmap)
 }
 
-func (cf *ColumnFamily) Scanner(query Query) CFQuery {
+func (cf *CF) Scanner(query Query) CFQuery {
 	return CFQuery{cf, query, nil}
 }
 
 type CFQuery struct {
-	cf    *ColumnFamily
+	cf    *CF
 	query Query
 	err   error
 }
@@ -480,7 +479,7 @@ func (q *CFQuery) Close() error {
 	return q.err
 }
 
-// ReflectColumnFamily generates a column family definition from a struct value. It uses reflection
+// ReflectCF generates a column family definition from a struct value. It uses reflection
 // to inspect the fields of the given template (which can be a zero value). A column is configured
 // for each exported field that has a marshalable type. Currently supported types are:
 //
@@ -492,10 +491,10 @@ func (q *CFQuery) Close() error {
 //  * bool       (marshals to boolean)
 //  * time.Time  (marshals to timestamp)
 //
-// The returned ColumnFamily will support row operations on pointers to values of the same type as
+// The returned CF will support row operations on pointers to values of the same type as
 // the given template, without requiring an implementation of the Row interface.
-func ReflectColumnFamily(template interface{}) *ColumnFamily {
-	cf := &ColumnFamily{}
+func ReflectCF(template interface{}) *CF {
+	cf := &CF{}
 	cf.rowReflector = newRowReflector(cf, template)
 	return cf
 }

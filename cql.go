@@ -106,7 +106,7 @@ func (b *CQLBuilder) AppendCQL(cql CQL) *CQLBuilder {
 
 // SelectBuilder provides a declarative interface for building CQL SELECT statements.
 type SelectBuilder struct {
-	cf      *ColumnFamily
+	cf      *CF
 	cols    []string
 	where   CQLBuilder
 	orderBy CQLBuilder
@@ -128,7 +128,7 @@ func Select(keys ...string) *SelectBuilder {
 }
 
 // From gives the column family to select from.
-func (sel *SelectBuilder) From(cf *ColumnFamily) *SelectBuilder {
+func (sel *SelectBuilder) From(cf *CF) *SelectBuilder {
 	sel.cf = cf
 	return sel
 }
@@ -186,7 +186,7 @@ func (sel *SelectBuilder) Query() Query {
 
 // InsertBuilder provides a declarative interface for building CQL INSERT statements.
 type InsertBuilder struct {
-	cf     *ColumnFamily
+	cf     *CF
 	keys   []string
 	values []interface{}
 	cas    bool
@@ -196,7 +196,7 @@ type InsertBuilder struct {
 // given column family.
 //
 //   InsertInto(model.Pets).Keys("Name", "Color").Values("Ezzie", "black").IfNotExists()
-func InsertInto(cf *ColumnFamily) *InsertBuilder {
+func InsertInto(cf *CF) *InsertBuilder {
 	return &InsertBuilder{cf: cf, keys: make([]string, 0), values: make([]interface{}, 0)}
 }
 
@@ -242,7 +242,7 @@ func (ins *InsertBuilder) Query() Query {
 
 // UpdateBuilder provides a declarative interface for building CQL UPDATE statements.
 type UpdateBuilder struct {
-	cf    *ColumnFamily
+	cf    *CF
 	set   CQLBuilder
 	where CQLBuilder
 }
@@ -251,7 +251,7 @@ type UpdateBuilder struct {
 // column family.
 //
 //   Update(model.Users).Set("Password", "hunter2").Where("Name = ?", "logan")
-func Update(cf *ColumnFamily) *UpdateBuilder {
+func Update(cf *CF) *UpdateBuilder {
 	return &UpdateBuilder{cf: cf, set: make(CQLBuilder, 0), where: make(CQLBuilder, 0)}
 }
 
@@ -285,7 +285,7 @@ func (upd *UpdateBuilder) Query() Query {
 
 // DeleteBuilder provides a declarative interface for building CQL DELETE statements.
 type DeleteBuilder struct {
-	cf    *ColumnFamily
+	cf    *CF
 	where CQLBuilder
 }
 
@@ -293,7 +293,7 @@ type DeleteBuilder struct {
 // column family.
 //
 //   DeleteFrom(model.Users).Where("Name = ?", "logan")
-func DeleteFrom(cf *ColumnFamily) *DeleteBuilder {
+func DeleteFrom(cf *CF) *DeleteBuilder {
 	return &DeleteBuilder{cf: cf, where: make(CQLBuilder, 0)}
 }
 

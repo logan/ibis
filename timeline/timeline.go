@@ -9,11 +9,11 @@ import "strings"
 import "github.com/logan/ibis"
 
 type IndexTable struct {
-	*ibis.ColumnFamily
+	*ibis.CF
 }
 
-func (t *IndexTable) CF() *ibis.ColumnFamily {
-	t.ColumnFamily = ibis.ReflectColumnFamily(Entry{})
+func (t *IndexTable) NewCF() *ibis.CF {
+	t.CF = ibis.ReflectCF(Entry{})
 	t.Provide(IndexProvider(t))
 	return t.Key("Partition", "SeqID")
 }
@@ -130,7 +130,7 @@ func (scanner *IndexScanner) start() ibis.CFQuery {
 			scanner.err = err
 		}
 	}
-	cql := ibis.Select().From(scanner.index.Table.ColumnFamily).
+	cql := ibis.Select().From(scanner.index.Table.CF).
 		Where("Partition = ?", scanner.index.Name).
 		Where("SeqID < ?", scanner.since).
 		OrderBy("SeqID DESC")
