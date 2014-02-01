@@ -194,6 +194,9 @@ func (cf *CF) Provide(x interface{}) {
 //        }
 //
 func (cf *CF) GetProvider(dest interface{}) bool {
+	if cf.provisions == nil {
+		return false
+	}
 	destPtrType := reflect.TypeOf(dest)
 	if destPtrType.Kind() != reflect.Ptr {
 		panic("destination must be a pointer to an interface")
@@ -202,9 +205,6 @@ func (cf *CF) GetProvider(dest interface{}) bool {
 	destType := destValue.Type()
 	if destType.Kind() != reflect.Interface {
 		panic("destination must be a pointer to an interface")
-	}
-	if cf.provisions == nil {
-		return false
 	}
 	for _, provision := range cf.provisions {
 		if provision.Type().ConvertibleTo(destType) {

@@ -252,7 +252,7 @@ func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
 		if fieldval.IsValid() {
 			if seqid, ok := fieldval.Interface().(SeqID); ok && seqid == "" {
 				var gen SeqIDGenerator
-				if rr.cf.GetProvider(&gen) {
+				if rr.cf.Schema().GetProvider(&gen) {
 					if seqid, err = gen.NewSeqID(); err != nil {
 						return err
 					}

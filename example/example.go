@@ -33,7 +33,6 @@ func (t *PostTable) NewCF() *ibis.CF {
 }
 
 type Model struct {
-	ibis.SeqIDGenerator
 	Users *UserTable
 	Posts *PostTable
 }
@@ -43,8 +42,10 @@ func NewModel(cluster ibis.Cluster) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	model := &Model{SeqIDGenerator: idgen}
+
+	model := &Model{}
 	schema := ibis.ReflectSchema(model)
+	schema.Provide(idgen)
 	schema.Cluster = cluster
 
 	if schema.SchemaUpdates, err = ibis.DiffLiveSchema(cluster, schema); err != nil {

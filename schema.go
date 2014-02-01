@@ -14,6 +14,7 @@ type Schema struct {
 	ColumnTags
 
 	nextTypeID int
+	provisions []reflect.Value
 }
 
 // NewSchema returns an empty, unbound schema.
@@ -36,14 +37,44 @@ func (s *Schema) AddCF(cf *CF) {
 	}
 }
 
+// Provide associates an interface for lookup with GetProvider.
+func (s *Schema) Provide(x interface{}) {
+	if s.provisions == nil {
+		s.provisions = make([]reflect.Value, 0)
+	}
+	s.provisions = append(s.provisions, reflect.ValueOf(x))
+}
+
 // GetProvider checks all of this schema's column families for a provider that implements the
-// interface pointed to by dest. A panic will occur if dest is not a pointer to an interface.
-// If multiple compatible providers are registered across the schema, an arbitrary one will be
-// used. If a compatible provider is found, it is copied into *dest and true is returned. Otherwise
+// interface pointed to by dest. If none is found, one will be retrieved from the schema's own list
+// of providers.
+//
+// A panic will occur if dest is not a pointer to an interface.
+//
+// If multiple compatible providers are registered across the schema, an arbitrary one will be used.
+// If a compatible provider is found, it is copied into *dest and true is returned. Otherwise
 // false is returned.
 func (s *Schema) GetProvider(dest interface{}) bool {
 	for _, cf := range s.CFs {
 		if cf.GetProvider(dest) {
+			return true
+		}
+	}
+	destPtrType := reflect.TypeOf(dest)
+	if destPtrType.Kind() != reflect.Ptr {
+		panic("destination must be a pointer to an interface")
+	}
+	if s.provisions == nil {
+		return false
+	}
+	destValue := reflect.ValueOf(dest).Elem()
+	destType := destValue.Type()
+	if destType.Kind() != reflect.Interface {
+		panic("destination must be a pointer to an interface")
+	}
+	for _, provision := range s.provisions {
+		if provision.Type().ConvertibleTo(destType) {
+			destValue.Set(provision)
 			return true
 		}
 	}
