@@ -25,7 +25,6 @@ func NewSchema() *Schema {
 func (s *Schema) AddCF(cf *CF) {
 	s.CFs[strings.ToLower(cf.name)] = cf
 	cf.schema = s
-	cf.Cluster = s.Cluster
 	if cf.typeID == 0 {
 		cf.typeID = s.nextTypeID
 		s.nextTypeID++
@@ -56,17 +55,9 @@ func (s *Schema) DialCassandra(config CassandraConfig) error {
 	if err != nil {
 		return err
 	}
-	s.SetCluster(cluster)
+	s.Cluster = cluster
 	s.SchemaUpdates, err = DiffLiveSchema(s.Cluster, s)
 	return err
-}
-
-// SetCluster connects a schema (and all of its column families) to a Cluster.
-func (s *Schema) SetCluster(cluster Cluster) {
-	s.Cluster = cluster
-	for _, cf := range s.CFs {
-		cf.Cluster = cluster
-	}
 }
 
 // RequiresUpdates returns true if this schema differs from the existing column families in the

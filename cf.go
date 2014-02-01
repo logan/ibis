@@ -28,8 +28,6 @@ type CFProvider interface {
 // CF describes how rows of a column family (table) are stored in Cassandra. If connected to a
 // live schema, then operations on a column family may be made through methods on this type.
 type CF struct {
-	Cluster
-
 	// data definition
 	name       string
 	columns    []Column
@@ -50,6 +48,13 @@ func (cf *CF) NewCF() *CF {
 }
 
 func (cf *CF) Schema() *Schema { return cf.schema }
+
+func (cf *CF) Cluster() Cluster {
+	if cf.schema != nil {
+		return cf.schema.Cluster
+	}
+	return nil
+}
 
 // Key configures the primary key for this column family. It takes names of columns as strings.
 // At least one argument is required, specifying the partition key. Zero or more additional
@@ -103,7 +108,9 @@ func (cf *CF) CreateStatement() CQL {
 		b.Append(fmt.Sprintf(" WITH comment='%d'", cf.typeID))
 	}
 	cql := b.CQL()
-	cql.Cluster(cf.Cluster)
+	if cf.schema != nil {
+		cql.Cluster(cf.schema.Cluster)
+	}
 	return cql
 }
 
@@ -202,7 +209,7 @@ func (cf *CF) GetProvider(dest interface{}) bool {
 
 // IsBound returns true if the column family is part of a schema that is connected to a cluster.
 func (cf *CF) IsBound() bool {
-	return cf.Cluster != nil
+	return cf.schema != nil && cf.schema.Cluster != nil
 }
 
 // Exists returns true if a row can be found in the column family with the given primary key.
@@ -375,7 +382,7 @@ func (cf *CF) commit(row interface{}, cas bool) error {
 		return err
 	}
 	if len(cqls) > 0 {
-		if err := cf.Cluster.Query(cqls...).Exec(); err != nil {
+		if err := cf.schema.Cluster.Query(cqls...).Exec(); err != nil {
 			return err
 		}
 	}

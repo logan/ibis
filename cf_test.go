@@ -82,15 +82,11 @@ type crudModel struct {
 	*Schema
 }
 
-func (m *crudModel) Close() {
-	m.crudTable.cf.Cluster.Close()
-}
-
 func newCrudModel(t *testing.T) *crudModel {
 	cluster := NewTestConn(t)
 	model := &crudModel{}
 	model.Schema = ReflectSchema(model)
-	model.Schema.SetCluster(cluster)
+	model.Schema.Cluster = cluster
 
 	var err error
 	if model.Schema.SchemaUpdates, err = DiffLiveSchema(cluster, model.Schema); err != nil {

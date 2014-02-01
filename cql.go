@@ -176,7 +176,7 @@ func (sel *SelectBuilder) CQL() CQL {
 		b.Append(fmt.Sprintf(" LIMIT %d", sel.limit))
 	}
 	cql := b.CQL()
-	cql.Cluster(sel.cf.Cluster)
+	cql.Cluster(sel.cf.Cluster())
 	return cql
 }
 
@@ -232,7 +232,7 @@ func (ins *InsertBuilder) CQL() CQL {
 		b.Append(" IF NOT EXISTS")
 	}
 	cql := b.CQL()
-	cql.Cluster(ins.cf.Cluster)
+	cql.Cluster(ins.cf.Cluster())
 	return cql
 }
 
@@ -275,7 +275,7 @@ func (upd *UpdateBuilder) CQL() CQL {
 	b.AppendCQL(upd.set.join(" SET ", ", "))
 	b.AppendCQL(upd.where.join(" WHERE ", " AND "))
 	cql := b.CQL()
-	cql.Cluster(upd.cf.Cluster)
+	cql.Cluster(upd.cf.Cluster())
 	return cql
 }
 
@@ -307,7 +307,7 @@ func (del *DeleteBuilder) Where(term string, params ...interface{}) *DeleteBuild
 // CQL compiles the built delete statement.
 func (del *DeleteBuilder) CQL() CQL {
 	cql := del.where.join("DELETE FROM "+del.cf.name+" WHERE ", " AND ")
-	cql.Cluster(del.cf.Cluster)
+	cql.Cluster(del.cf.Cluster())
 	return cql
 }
 
