@@ -6,32 +6,30 @@ import "os"
 import "github.com/logan/ibis"
 
 type User struct {
-	Name string
+	Name string `ibis:"key"`
 }
 
-type UserTable struct {
-	*ibis.ColumnFamily
-}
+type UserTable struct{ *ibis.CF }
 
-func (t *UserTable) CF() *ibis.ColumnFamily {
-	t.ColumnFamily = ibis.ReflectColumnFamily(User{})
-	return t.Key("Name")
+func (t *UserTable) NewCF() *ibis.CF {
+	t.CF = ibis.ReflectCF(User{})
+	return t.CF
 }
 
 type Post struct {
-	ibis.SeqID
+	ibis.SeqID `ibis:"key"`
 	AuthorName string
 	Title      string
 	Body       string
 }
 
 type PostTable struct {
-	*ibis.ColumnFamily
+	*ibis.CF
 }
 
-func (t *PostTable) CF() *ibis.ColumnFamily {
-	t.ColumnFamily = ibis.ReflectColumnFamily(Post{})
-	return t.Key("SeqID")
+func (t *PostTable) NewCF() *ibis.CF {
+	t.CF = ibis.ReflectCF(Post{})
+	return t.CF
 }
 
 type Model struct {
