@@ -23,7 +23,7 @@ func newTestModel(t *testing.T) *testModel {
 	schema := ibis.ReflectSchema(model)
 	schema.SetCluster(model.cluster)
 	// set up seqid sequence to be 1000, 1001, 1002, ...
-	model.Indexes.SeqIDGenerator = model.lastSeqID
+	model.Indexes.Provide(ibis.SeqIDGenerator(model.lastSeqID))
 
 	var err error
 	if schema.SchemaUpdates, err = ibis.DiffLiveSchema(model.cluster, schema); err != nil {
@@ -86,7 +86,11 @@ func TestIndex(t *testing.T) {
 	}
 
 	newSeqID := func() ibis.SeqID {
-		seqid, _ := model.Indexes.SeqIDGenerator.NewSeqID()
+		var gen ibis.SeqIDGenerator
+		if !model.Indexes.GetProvider(&gen) {
+			t.Fatal("expected SeqIDGenerator to be provided")
+		}
+		seqid, _ := gen.NewSeqID()
 		return seqid
 	}
 	if err := idx.Add(newSeqID(), []byte{0}); err != nil {

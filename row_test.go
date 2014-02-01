@@ -95,7 +95,7 @@ func TestReflectedMarshalAndUnmarshal(t *testing.T) {
 	ReflectSchema(&model)
 	cf := model.T.cf
 	g := FakeSeqIDGenerator(36 * 36 * 36) // "1000" in base-36
-	cf.SeqIDGenerator = &g
+	cf.Provide(SeqIDGenerator(&g))
 
 	var r marshalTestRow
 

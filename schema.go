@@ -114,10 +114,8 @@ func ReflectSchema(model interface{}) *Schema {
 		panic("model must be pointer to struct")
 	}
 	providerType := reflect.TypeOf((*CFProvider)(nil)).Elem()
-	idGenType := reflect.TypeOf((*SeqIDGenerator)(nil)).Elem()
 	schema := NewSchema()
 
-	var idGen SeqIDGenerator
 	for i := 0; i < model_type.NumField(); i++ {
 		field := model_type.Field(i)
 		if field.PkgPath != "" {
@@ -138,13 +136,6 @@ func ReflectSchema(model interface{}) *Schema {
 				}
 				schema.AddCF(cf)
 			}
-		} else if field.Type.ConvertibleTo(idGenType) {
-			idGen = field_value.Interface().(SeqIDGenerator)
-		}
-	}
-	if idGen != nil {
-		for _, cf := range schema.CFs {
-			cf.SeqIDGenerator = idGen
 		}
 	}
 	return schema

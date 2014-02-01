@@ -28,7 +28,6 @@ type CFProvider interface {
 // CF describes how rows of a column family (table) are stored in Cassandra. If connected to a
 // live schema, then operations on a column family may be made through methods on this type.
 type CF struct {
-	SeqIDGenerator
 	Cluster
 
 	// data definition

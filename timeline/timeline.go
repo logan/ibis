@@ -123,11 +123,14 @@ func (scanner *IndexScanner) Error() error {
 func (scanner *IndexScanner) start() ibis.CFQuery {
 	if scanner.since == "" {
 		// If no since is given, generate the next SeqID to start a scan from right now.
-		next, err := scanner.index.Table.NewSeqID()
-		if err == nil {
-			scanner.since = next.Pad()
-		} else {
-			scanner.err = err
+		var gen ibis.SeqIDGenerator
+		if scanner.index.Table.GetProvider(&gen) {
+			next, err := gen.NewSeqID()
+			if err == nil {
+				scanner.since = next.Pad()
+			} else {
+				scanner.err = err
+			}
 		}
 	}
 	cql := ibis.Select().From(scanner.index.Table.CF).

@@ -251,8 +251,9 @@ func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
 		fieldval := rr.value.FieldByName(col.Name)
 		if fieldval.IsValid() {
 			if seqid, ok := fieldval.Interface().(SeqID); ok && seqid == "" {
-				if rr.cf.SeqIDGenerator != nil {
-					if seqid, err = rr.cf.NewSeqID(); err != nil {
+				var gen SeqIDGenerator
+				if rr.cf.GetProvider(&gen) {
+					if seqid, err = gen.NewSeqID(); err != nil {
 						return err
 					}
 					fieldval.Set(reflect.ValueOf(seqid))
