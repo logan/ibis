@@ -92,9 +92,9 @@ func GetLiveSchema(c Cluster) (*Schema, error) {
 		nextTypeID: nextTypeID,
 	}
 	for _, t := range tables {
-		schema.CFs[strings.ToLower(t.Name)] = t
+		schema.CFs[strings.ToLower(t.name)] = t
 	}
-	cf := &CF{Name: "system.schema_columns"}
+	cf := &CF{name: "system.schema_columns"}
 	sel := Select("columnfamily_name", "column_name", "validator").
 		From(cf).Where("keyspace_name = ?", c.GetKeyspace())
 	cql := sel.CQL()
@@ -105,18 +105,18 @@ func GetLiveSchema(c Cluster) (*Schema, error) {
 		col := Column{Name: col_name, Type: typeFromValidator(validator)}
 		t := schema.CFs[cf_name]
 		if t != nil {
-			t.Columns = append(t.Columns, col)
+			t.columns = append(t.columns, col)
 		}
 	}
 	for _, cf := range schema.CFs {
 		// reapply primary key to fix column ordering
-		cf.Key(cf.PrimaryKey...)
+		cf.Key(cf.primaryKey...)
 	}
 	return &schema, qiter.Close()
 }
 
 func getLiveColumnFamilies(cluster Cluster, keyspace string) ([]*CF, int, error) {
-	cf := &CF{Name: "system.schema_columnfamilies"}
+	cf := &CF{name: "system.schema_columnfamilies"}
 	sel := Select("columnfamily_name", "key_aliases", "column_aliases", "comment").
 		From(cf).Where("keyspace_name = ?", keyspace)
 	cql := sel.CQL()
@@ -126,7 +126,7 @@ func getLiveColumnFamilies(cluster Cluster, keyspace string) ([]*CF, int, error)
 	var cf_name, key_aliases, column_aliases, comment string
 	maxTypeID := 0
 	for qiter.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
-		t := CF{Name: cf_name, Columns: make([]Column, 0, 16)}
+		t := CF{name: cf_name, columns: make([]Column, 0, 16)}
 		t.Key(keyFromAliases(key_aliases, column_aliases)...)
 		t.typeID = typeIDFromComment(comment)
 		if t.typeID > maxTypeID {
@@ -178,7 +178,7 @@ func DiffLiveSchema(c Cluster, model *Schema) (*SchemaDiff, error) {
 		if t.typeID >= model.nextTypeID {
 			model.nextTypeID = t.typeID + 1
 		}
-		if model_t, ok := model.CFs[t.Name]; ok {
+		if model_t, ok := model.CFs[t.name]; ok {
 			model_t.typeID = t.typeID
 		}
 	}
@@ -188,10 +188,10 @@ func DiffLiveSchema(c Cluster, model *Schema) (*SchemaDiff, error) {
 		if ok {
 			alteration := tableAlteration{name, make([]Column, 0), make([]Column, 0)}
 			old_cols := make(map[string]string)
-			for _, col := range live_table.Columns {
+			for _, col := range live_table.columns {
 				old_cols[strings.ToLower(col.Name)] = col.Type
 			}
-			for _, col := range model_table.Columns {
+			for _, col := range model_table.columns {
 				var old_type string
 				if old_type, ok = old_cols[strings.ToLower(col.Name)]; ok {
 					if old_type != col.Type {

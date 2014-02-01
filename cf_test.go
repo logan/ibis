@@ -17,7 +17,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 		SeqID  SeqID
 	}
 
-	cf := &CF{Name: "test"}
+	cf := &CF{name: "test"}
 	cf.fillFromRowType(reflect.TypeOf(table{}))
 	cf.Key("Str")
 

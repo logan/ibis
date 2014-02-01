@@ -29,23 +29,23 @@ func TestReflectSchema(t *testing.T) {
 		Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
 	}
 	m := &model{}
-	m.Defined = &CF{Columns: expectedColumns}
+	m.Defined = &CF{columns: expectedColumns}
 	m.Defined.Key("Str")
-	t.Logf("m.Defined.Columns = %+v", m.Defined.Columns)
+	t.Logf("m.Defined.columns = %+v", m.Defined.columns)
 	schema := ReflectSchema(m)
-	t.Logf("m.Defined.Columns = %+v", m.Defined.Columns)
+	t.Logf("m.Defined.columns = %+v", m.Defined.columns)
 
 	cf, ok := schema.CFs["defined"]
 	if !ok {
 		t.Error("column family 'defined' wasn't included")
-	} else if !reflect.DeepEqual(expectedColumns, cf.Columns) {
-		t.Errorf("\nexpected: %+v\nreceived: %+v", expectedColumns, cf.Columns)
+	} else if !reflect.DeepEqual(expectedColumns, cf.columns) {
+		t.Errorf("\nexpected: %+v\nreceived: %+v", expectedColumns, cf.columns)
 	}
 
 	cf, ok = schema.CFs["reflected"]
 	if !ok {
 		t.Error("column family 'reflected' wasn't included")
-	} else if !reflect.DeepEqual(expectedColumns, cf.Columns) {
-		t.Errorf("\nexpected: %+v\nreceived: %+v", expectedColumns, cf.Columns)
+	} else if !reflect.DeepEqual(expectedColumns, cf.columns) {
+		t.Errorf("\nexpected: %+v\nreceived: %+v", expectedColumns, cf.columns)
 	}
 }

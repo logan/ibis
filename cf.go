@@ -28,12 +28,15 @@ type CFProvider interface {
 // CF describes how rows of a column family (table) are stored in Cassandra. If connected to a
 // live schema, then operations on a column family may be made through methods on this type.
 type CF struct {
-	Name       string   // The name of the column family.
-	Columns    []Column // The definition of the column family's columns.
-	PrimaryKey []string
 	SeqIDGenerator
 	Cluster
 
+	// data definition
+	name       string
+	columns    []Column
+	primaryKey []string
+
+	// plumbing
 	schema *Schema
 	typeID int
 	*rowReflector
@@ -56,13 +59,13 @@ func (cf *CF) Schema() *Schema { return cf.schema }
 // Key returns a pointer to the column family it was called on so it can be chained during
 // configuration.
 func (cf *CF) Key(keys ...string) *CF {
-	cf.PrimaryKey = keys
+	cf.primaryKey = keys
 
 	// primary key columns must come first and in order
-	rearranged := make([]Column, len(cf.Columns))
+	rearranged := make([]Column, len(cf.columns))
 	keymap := make(map[string]bool)
 	for i, k := range keys {
-		for _, col := range cf.Columns {
+		for _, col := range cf.columns {
 			if k == col.Name {
 				keymap[k] = true
 				rearranged[i] = col
@@ -71,13 +74,13 @@ func (cf *CF) Key(keys ...string) *CF {
 		}
 	}
 	i := len(keys)
-	for _, col := range cf.Columns {
+	for _, col := range cf.columns {
 		if _, ok := keymap[col.Name]; !ok {
 			rearranged[i] = col
 			i++
 		}
 	}
-	copy(cf.Columns, rearranged)
+	copy(cf.columns, rearranged)
 	return cf
 }
 
@@ -92,11 +95,11 @@ func (cf *CF) Precommit(hook PrecommitHook) *CF {
 // CreateStatement returns the CQL statement that would create this table.
 func (cf *CF) CreateStatement() CQL {
 	var b CQLBuilder
-	b.Append("CREATE TABLE " + cf.Name + " (")
-	for _, col := range cf.Columns {
+	b.Append("CREATE TABLE " + cf.name + " (")
+	for _, col := range cf.columns {
 		b.Append(col.Name + " " + col.Type + ", ")
 	}
-	b.Append("PRIMARY KEY (" + strings.Join(cf.PrimaryKey, ", ") + "))")
+	b.Append("PRIMARY KEY (" + strings.Join(cf.primaryKey, ", ") + "))")
 	if cf.typeID != 0 {
 		b.Append(fmt.Sprintf(" WITH comment='%d'", cf.typeID))
 	}
@@ -117,7 +120,7 @@ func (cf *CF) fillFromRowType(row_type reflect.Type) {
 	if row_type.Kind() != reflect.Struct {
 		panic("row must be struct")
 	}
-	cf.Columns = columnsFromStructType(row_type)
+	cf.columns = columnsFromStructType(row_type)
 }
 
 func columnsFromStructType(struct_type reflect.Type) []Column {
@@ -211,7 +214,7 @@ func (cf *CF) Exists(key ...interface{}) (bool, error) {
 		return false, ErrTableNotBound
 	}
 	sel := Select("COUNT(*)").From(cf)
-	for i, k := range cf.PrimaryKey {
+	for i, k := range cf.primaryKey {
 		sel.Where(k+" = ?", key[i])
 	}
 	qiter := sel.CQL().Query()
@@ -235,13 +238,13 @@ func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 		return ErrTableNotBound
 	}
 
-	colnames := make([]string, len(cf.Columns))
-	for i, col := range cf.Columns {
+	colnames := make([]string, len(cf.columns))
+	for i, col := range cf.columns {
 		colnames[i] = col.Name
 	}
 
 	sel := Select(colnames...).From(cf)
-	for i, k := range cf.PrimaryKey {
+	for i, k := range cf.primaryKey {
 		sel.Where(k+" = ?", key[i])
 	}
 	qiter := sel.CQL().Query()
@@ -324,8 +327,8 @@ func (cf *CF) applyPrecommitHooks(row interface{}) ([]CQL, error) {
 func (cf *CF) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
 	// TODO: make the cas path more separate?
 	if cas {
-		selectedKeys := make([]string, len(cf.Columns))
-		for i, col := range cf.Columns {
+		selectedKeys := make([]string, len(cf.columns))
+		for i, col := range cf.columns {
 			selectedKeys[i] = col.Name
 		}
 		ins := InsertInto(cf).
@@ -337,7 +340,7 @@ func (cf *CF) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
 	} else {
 		var selectedKeys []string
 		// If any primary keys are dirty, invalidate the entire object.
-		for _, k := range cf.PrimaryKey {
+		for _, k := range cf.primaryKey {
 			if mmap[k].Dirty {
 				selectedKeys = mmap.Keys()
 			}
@@ -350,7 +353,7 @@ func (cf *CF) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
 			for _, k := range selectedKeys {
 				upd.Set(k, mmap[k])
 			}
-			for _, k := range cf.PrimaryKey {
+			for _, k := range cf.primaryKey {
 				upd.Where(k+" = ?", mmap[k])
 			}
 			cql = upd.CQL()
@@ -392,8 +395,8 @@ func (cf *CF) commit(row interface{}, cas bool) error {
 		// response, but we need to supply MarshalledValue pointers for the returned columns anyway.
 		// Despite this, the values pointed to will not be filled in except in the case of error.
 		casmap := make(MarshalledMap)
-		selectedKeys := make([]string, len(cf.Columns))
-		for i, col := range cf.Columns {
+		selectedKeys := make([]string, len(cf.columns))
+		for i, col := range cf.columns {
 			selectedKeys[i] = col.Name
 		}
 		pointers := casmap.PointersTo(selectedKeys...)
@@ -459,8 +462,8 @@ type CFQuery struct {
 }
 
 func (q *CFQuery) ScanRow(dest interface{}) bool {
-	cols := make([]string, len(q.cf.Columns))
-	for i, col := range q.cf.Columns {
+	cols := make([]string, len(q.cf.columns))
+	for i, col := range q.cf.columns {
 		cols[i] = col.Name
 	}
 	mmap := make(MarshalledMap)

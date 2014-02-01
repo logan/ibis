@@ -31,8 +31,8 @@ func TestGetLiveSchema(t *testing.T) {
 	}
 
 	expected := CF{
-		Name: "test",
-		Columns: []Column{
+		name: "test",
+		columns: []Column{
 			Column{Name: "blobcol", Type: "blob"},
 			Column{Name: "boolcol", Type: "boolean"},
 			Column{Name: "float64col", Type: "double"},
@@ -69,8 +69,8 @@ func TestDiffLiveSchema(t *testing.T) {
 	model := &Schema{
 		CFs: Keyspace{
 			"T1": &CF{
-				Name: "T1",
-				Columns: []Column{
+				name: "T1",
+				columns: []Column{
 					Column{Name: "A", Type: "varchar"},
 					Column{Name: "B", Type: "varchar"},
 				},
@@ -93,11 +93,11 @@ func TestDiffLiveSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	model.CFs["T1"].Columns[1].Type = "blob"
-	model.CFs["T1"].Columns = append(model.CFs["T1"].Columns, Column{Name: "C", Type: "bigint"})
+	model.CFs["T1"].columns[1].Type = "blob"
+	model.CFs["T1"].columns = append(model.CFs["T1"].columns, Column{Name: "C", Type: "bigint"})
 	model.CFs["T2"] = &CF{
-		Name:    "T2",
-		Columns: []Column{Column{Name: "X", Type: "varchar"}},
+		name:    "T2",
+		columns: []Column{Column{Name: "X", Type: "varchar"}},
 	}
 	model.CFs["T2"].Key("X")
 	expected = &SchemaDiff{
@@ -105,8 +105,8 @@ func TestDiffLiveSchema(t *testing.T) {
 		alterations: []tableAlteration{
 			tableAlteration{
 				TableName:      "T1",
-				NewColumns:     model.CFs["T1"].Columns[2:],
-				AlteredColumns: []Column{model.CFs["T1"].Columns[1]},
+				NewColumns:     model.CFs["T1"].columns[2:],
+				AlteredColumns: []Column{model.CFs["T1"].columns[1]},
 			},
 		},
 	}

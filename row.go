@@ -247,7 +247,7 @@ func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
 		marshalled []byte
 		err        error
 	)
-	for _, col := range rr.cf.Columns {
+	for _, col := range rr.cf.columns {
 		fieldval := rr.value.FieldByName(col.Name)
 		if fieldval.IsValid() {
 			if seqid, ok := fieldval.Interface().(SeqID); ok && seqid == "" {

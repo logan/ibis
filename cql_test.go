@@ -9,8 +9,8 @@ func TestCQL(t *testing.T) {
 	}
 
 	cf := &CF{
-		Name: "Table",
-		Columns: []Column{
+		name: "Table",
+		columns: []Column{
 			Column{Name: "X"},
 			Column{Name: "Y"},
 			Column{Name: "Z"},

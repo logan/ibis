@@ -23,7 +23,7 @@ func NewSchema() *Schema {
 
 // AddCF adds a column family definition to the schema.
 func (s *Schema) AddCF(cf *CF) {
-	s.CFs[strings.ToLower(cf.Name)] = cf
+	s.CFs[strings.ToLower(cf.name)] = cf
 	cf.schema = s
 	cf.Cluster = s.Cluster
 	if cf.typeID == 0 {
@@ -132,7 +132,7 @@ func ReflectSchema(model interface{}) *Schema {
 					provider = field_value.Interface().(CFProvider)
 				}
 				cf := provider.NewCF()
-				cf.Name = strings.ToLower(field.Name)
+				cf.name = strings.ToLower(field.Name)
 				if cf.rowReflector != nil {
 					cf.fillFromRowType(cf.rowReflector.rowType.Elem())
 				}

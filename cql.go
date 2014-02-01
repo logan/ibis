@@ -158,14 +158,14 @@ func (sel *SelectBuilder) CQL() CQL {
 	var b CQLBuilder
 	b.Append("SELECT ")
 	if sel.cols == nil || (len(sel.cols) == 1 && sel.cols[0] == "*") {
-		sel.cols = make([]string, len(sel.cf.Columns))
-		for i, col := range sel.cf.Columns {
+		sel.cols = make([]string, len(sel.cf.columns))
+		for i, col := range sel.cf.columns {
 			sel.cols[i] = col.Name
 		}
 	}
 	b.Append(strings.Join(sel.cols, ", "))
 	b.Append(" FROM ")
-	b.Append(sel.cf.Name)
+	b.Append(sel.cf.name)
 	if sel.where != nil {
 		b.AppendCQL(sel.where.join(" WHERE ", " AND "))
 	}
@@ -222,7 +222,7 @@ func (ins *InsertBuilder) IfNotExists() *InsertBuilder {
 func (ins *InsertBuilder) CQL() CQL {
 	var b CQLBuilder
 	b.Append("INSERT INTO ")
-	b.Append(ins.cf.Name)
+	b.Append(ins.cf.name)
 	b.Append(" (")
 	b.Append(strings.Join(ins.keys, ", "))
 	b.Append(") VALUES (")
@@ -271,7 +271,7 @@ func (upd *UpdateBuilder) Where(term string, params ...interface{}) *UpdateBuild
 // CQL compiles the built update statement.
 func (upd *UpdateBuilder) CQL() CQL {
 	var b CQLBuilder
-	b.Append("UPDATE " + upd.cf.Name)
+	b.Append("UPDATE " + upd.cf.name)
 	b.AppendCQL(upd.set.join(" SET ", ", "))
 	b.AppendCQL(upd.where.join(" WHERE ", " AND "))
 	cql := b.CQL()
@@ -306,7 +306,7 @@ func (del *DeleteBuilder) Where(term string, params ...interface{}) *DeleteBuild
 
 // CQL compiles the built delete statement.
 func (del *DeleteBuilder) CQL() CQL {
-	cql := del.where.join("DELETE FROM "+del.cf.Name+" WHERE ", " AND ")
+	cql := del.where.join("DELETE FROM "+del.cf.name+" WHERE ", " AND ")
 	cql.Cluster(del.cf.Cluster)
 	return cql
 }
