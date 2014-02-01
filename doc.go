@@ -33,7 +33,7 @@ Reflection is also available for defining column families themselves:
         type UserTable struct {*ibis.CF}
         func (t *UserTable) CF() *ibis.CF {
             t.CF = ibis.ReflectCF(User{})
-            return t.Key("Name")
+            return t.SetPrimaryKey("Name")
         }
         type Model struct{Users *UserTable}
         model := &Model{}
@@ -105,7 +105,7 @@ reflection:
         type UserTable struct {*ibis.CF}
         func (t *UserTable) CF() *ibis.CF {
             t.CF = ibis.ReflectCF(User{})
-            return t.Key("Name")
+            return t.SetPrimaryKey("Name")
         }
         type Model struct{Users *UserTable}
         model := &Model{}

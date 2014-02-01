@@ -30,7 +30,7 @@ type CFProvider interface {
 type CF struct {
 	// data definition
 	name       string
-	columns    []Column
+	columns    []*Column
 	primaryKey []string
 
 	// plumbing
@@ -49,6 +49,13 @@ func (cf *CF) NewCF() *CF {
 
 func (cf *CF) Schema() *Schema { return cf.schema }
 
+func (cf *CF) setSchema(schema *Schema) {
+	cf.schema = schema
+	for _, col := range cf.columns {
+		schema.ColumnTags.applyAll(col.tag, cf, col)
+	}
+}
+
 func (cf *CF) Cluster() Cluster {
 	if cf.schema != nil {
 		return cf.schema.Cluster
@@ -56,17 +63,17 @@ func (cf *CF) Cluster() Cluster {
 	return nil
 }
 
-// Key configures the primary key for this column family. It takes names of columns as strings.
-// At least one argument is required, specifying the partition key. Zero or more additional
+// SetPrimaryKey configures the primary key for this column family. It takes names of columns as
+// strings. At least one argument is required, specifying the partition key. Zero or more additional
 // arguments specify the name of the clustering columns.
 //
-// Key returns a pointer to the column family it was called on so it can be chained during
+// SetPrimaryKey returns a pointer to the column family it was called on so it can be chained during
 // configuration.
-func (cf *CF) Key(keys ...string) *CF {
+func (cf *CF) SetPrimaryKey(keys ...string) *CF {
 	cf.primaryKey = keys
 
 	// primary key columns must come first and in order
-	rearranged := make([]Column, len(cf.columns))
+	rearranged := make([]*Column, len(cf.columns))
 	keymap := make(map[string]bool)
 	for i, k := range keys {
 		for _, col := range cf.columns {
@@ -120,6 +127,7 @@ type Column struct {
 	Name     string
 	Type     string // The cassandra type of the column ("varchar", "bigint", etc.).
 	typeInfo *gocql.TypeInfo
+	tag      reflect.StructTag
 }
 
 func (cf *CF) fillFromRowType(row_type reflect.Type) {
@@ -129,8 +137,8 @@ func (cf *CF) fillFromRowType(row_type reflect.Type) {
 	cf.columns = columnsFromStructType(row_type)
 }
 
-func columnsFromStructType(struct_type reflect.Type) []Column {
-	cols := make([]Column, 0, struct_type.NumField())
+func columnsFromStructType(struct_type reflect.Type) []*Column {
+	cols := make([]*Column, 0, struct_type.NumField())
 	for i := 0; i < struct_type.NumField(); i++ {
 		field := struct_type.Field(i)
 		if col, ok := columnFromStructField(field); ok {
@@ -142,12 +150,12 @@ func columnsFromStructType(struct_type reflect.Type) []Column {
 	return cols
 }
 
-func columnFromStructField(field reflect.StructField) (Column, bool) {
+func columnFromStructField(field reflect.StructField) (*Column, bool) {
 	ts, ok := goTypeToCassType(field.Type)
 	if ok {
-		return Column{field.Name, ts, typeInfoMap[ts]}, true
+		return &Column{field.Name, ts, typeInfoMap[ts], field.Tag}, true
 	}
-	return Column{}, ok
+	return nil, ok
 }
 
 func goTypeToCassType(t reflect.Type) (string, bool) {
@@ -500,10 +508,46 @@ func (q *CFQuery) Close() error {
 //  * bool       (marshals to boolean)
 //  * time.Time  (marshals to timestamp)
 //
+// You can designate the primary key (or other features) with struct field tags. For example, a
+// column field with the tag `ibis:"key"` will become part of the primary key. The order of key
+// fields in the struct definition matters. Other features that apply at reflection may be available
+// under ibis.* tag names.
+//
 // The returned CF will support row operations on pointers to values of the same type as
 // the given template, without requiring an implementation of the Row interface.
 func ReflectCF(template interface{}) *CF {
 	cf := &CF{}
 	cf.rowReflector = newRowReflector(cf, template)
 	return cf
+}
+
+type ColumnTagApplier func(tagValue string, cf *CF, col *Column) error
+
+type ColumnTags struct {
+	tags map[string]ColumnTagApplier
+}
+
+func (t *ColumnTags) Register(name string, applier ColumnTagApplier) {
+	if t.tags == nil {
+		t.tags = make(map[string]ColumnTagApplier)
+	}
+	t.tags[name] = applier
+}
+
+func (t *ColumnTags) applyAll(tag reflect.StructTag, cf *CF, col *Column) []error {
+	errors := make([]error, 0)
+	for name, applier := range t.tags {
+		if name == "" {
+			name = "ibis"
+		} else {
+			name = "ibis." + name
+		}
+		val := tag.Get(name)
+		if val != "" {
+			if err := applier(val, cf, col); err != nil {
+				errors = append(errors, err)
+			}
+		}
+	}
+	return errors
 }

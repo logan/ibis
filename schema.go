@@ -1,5 +1,6 @@
 package ibis
 
+import "errors"
 import "reflect"
 import "strings"
 
@@ -10,21 +11,25 @@ type Schema struct {
 	Cluster
 	CFs           Keyspace
 	SchemaUpdates *SchemaDiff
-	nextTypeID    int
+	ColumnTags
+
+	nextTypeID int
 }
 
 // NewSchema returns an empty, unbound schema.
 func NewSchema() *Schema {
-	return &Schema{
+	schema := &Schema{
 		CFs:        make(Keyspace),
 		nextTypeID: 1,
 	}
+	schema.ColumnTags.Register("", applyStandardColumnTag)
+	return schema
 }
 
 // AddCF adds a column family definition to the schema.
 func (s *Schema) AddCF(cf *CF) {
 	s.CFs[strings.ToLower(cf.name)] = cf
-	cf.schema = s
+	cf.setSchema(s)
 	if cf.typeID == 0 {
 		cf.typeID = s.nextTypeID
 		s.nextTypeID++
@@ -88,7 +93,7 @@ func (s *Schema) IsBound() bool {
 //       type UserTable struct {*ibis.CF}
 //       func (t *UserTable) CF() *ibis.CF {
 //           t.CF = ibis.ReflectCF(User{})
-//           return t.Key("Name")
+//           return t.SetPrimaryKey("Name")
 //       }
 //       type Model struct{Users *UserTable}
 //       model := &Model{}
@@ -130,4 +135,18 @@ func ReflectSchema(model interface{}) *Schema {
 		}
 	}
 	return schema
+}
+
+func applyStandardColumnTag(tag string, cf *CF, col *Column) error {
+	switch {
+	case tag == "key":
+		if cf.primaryKey == nil {
+			cf.primaryKey = []string{col.Name}
+		} else {
+			cf.primaryKey = append(cf.primaryKey, col.Name)
+		}
+		return nil
+	default:
+		return errors.New("invalid column tag: " + tag)
+	}
 }

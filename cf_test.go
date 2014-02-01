@@ -19,7 +19,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 
 	cf := &CF{name: "test"}
 	cf.fillFromRowType(reflect.TypeOf(table{}))
-	cf.Key("Str")
+	cf.SetPrimaryKey("Str")
 
 	expect := func(expected string) (string, bool) {
 		received := cf.CreateStatement().String()
@@ -35,7 +35,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 		t.Error(msg)
 	}
 
-	cf.Key("Double", "Time", "Blob")
+	cf.SetPrimaryKey("Double", "Time", "Blob")
 	cf.typeID = 8
 
 	if msg, ok := expect("CREATE TABLE test (Double double, Time timestamp, Blob blob," +
@@ -57,13 +57,13 @@ type crudTable struct {
 
 func (t *crudTable) NewCF() *CF {
 	t.CF = ReflectCF(crudRow{})
-	return t.cf.Key("Partition", "Cluster")
+	return t.cf.SetPrimaryKey("Partition", "Cluster")
 }
 
 func (t *crudTable) crud() *crudTable { return t }
 
 type crudIndexRow struct {
-	Partition string
+	Partition string `ibis:"key"`
 	// TODO: test a counter here
 }
 
@@ -73,7 +73,7 @@ type crudIndexTable struct {
 
 func (t *crudIndexTable) NewCF() *CF {
 	t.CF = ReflectCF(crudIndexRow{})
-	return t.CF.Key("Partition")
+	return t.CF
 }
 
 type crudModel struct {

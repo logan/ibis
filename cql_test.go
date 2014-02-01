@@ -10,10 +10,10 @@ func TestCQL(t *testing.T) {
 
 	cf := &CF{
 		name: "Table",
-		columns: []Column{
-			Column{Name: "X"},
-			Column{Name: "Y"},
-			Column{Name: "Z"},
+		columns: []*Column{
+			&Column{Name: "X"},
+			&Column{Name: "Y"},
+			&Column{Name: "Z"},
 		},
 	}
 	if msg, ok := expect("SELECT X, Y, Z FROM Table", Select().From(cf).CQL()); !ok {

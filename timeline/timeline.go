@@ -8,6 +8,26 @@ import "strings"
 
 import "github.com/logan/ibis"
 
+type Entry struct {
+	Partition  string `ibis:"key"`
+	ibis.SeqID `ibis:"key"`
+	Bytes      []byte
+}
+
+func (e *Entry) encodePartition(name string) {
+	// TODO: add bucket and shard as args
+	e.Partition = name
+}
+
+func (e *Entry) decodePartition() string {
+	// TODO: add bucket and shard to compound return value
+	return e.Partition
+}
+
+func (e *Entry) Decode(v interface{}) error {
+	return json.Unmarshal(e.Bytes, v)
+}
+
 type IndexTable struct {
 	*ibis.CF
 }
@@ -15,7 +35,7 @@ type IndexTable struct {
 func (t *IndexTable) NewCF() *ibis.CF {
 	t.CF = ibis.ReflectCF(Entry{})
 	t.Provide(IndexProvider(t))
-	return t.Key("Partition", "SeqID")
+	return t.CF
 }
 
 func (t *IndexTable) Index(keys ...string) *Index {
@@ -53,26 +73,6 @@ func (idx *Index) MakeAdd(seqid ibis.SeqID, v interface{}) (ibis.CQL, error) {
 // TODO: add prefetch options
 func (idx *Index) Scanner() *IndexScanner {
 	return NewIndexScanner(idx)
-}
-
-type Entry struct {
-	ibis.SeqID
-	Partition string
-	Bytes     []byte
-}
-
-func (e *Entry) encodePartition(name string) {
-	// TODO: add bucket and shard as args
-	e.Partition = name
-}
-
-func (e *Entry) decodePartition() string {
-	// TODO: add bucket and shard to compound return value
-	return e.Partition
-}
-
-func (e *Entry) Decode(v interface{}) error {
-	return json.Unmarshal(e.Bytes, v)
 }
 
 type EntryChannel chan *Entry
