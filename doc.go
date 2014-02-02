@@ -7,10 +7,10 @@ In ibis, a Schema represents the definition of a set of column families in a Cas
 For certain simple cases, ibis can also automate the creation of these column families, or the
 addition of new columns at a later date.
 
-        userCols := []ibis.Column{
-            ibis.Column{Name: "User", Type: "varchar"},
-            ibis.Column{Name: "Password", Type: "varchar"},
-            ibis.Column{Name: "CreatedAt", Type: "timestamp"},
+        userCols := []*ibis.Column{
+            &ibis.Column{Name: "User", Type: "varchar"},
+            &ibis.Column{Name: "Password", Type: "varchar"},
+            &ibis.Column{Name: "CreatedAt", Type: "timestamp"},
         }
         schema := ibis.NewSchema()
         schema.AddCF(&ibis.CF{Name: "users", Columns: userCols})
@@ -18,10 +18,10 @@ addition of new columns at a later date.
 To reduce boilerplate, ibis offers reflection. For example, to generate a schema definition from
 a struct of column families:
 
-        userCols := []ibis.Column{
-            ibis.Column{Name: "User", Type: "varchar"},
-            ibis.Column{Name: "Password", Type: "varchar"},
-            ibis.Column{Name: "CreatedAt", Type: "timestamp"},
+        userCols := []*ibis.Column{
+            &ibis.Column{Name: "User", Type: "varchar"},
+            &ibis.Column{Name: "Password", Type: "varchar"},
+            &ibis.Column{Name: "CreatedAt", Type: "timestamp"},
         }
         type Model struct{Users *ibis.CF}
         model := &Model{Users: &ibis.CF{Columns: userCols}}
@@ -42,6 +42,15 @@ Reflection is also available for defining column families themselves:
 Using this reflective approach has the added benefit of eliminating the need to provide marshalling
 code to get data into and out of User values, as will be described shortly.
 
+Note that you must specify the primary key for the column family. This can be done with the
+SetPrimaryKey method, but alternatively you can declare keys in the definition of reflected struct:
+
+        type User struct {
+            Name string `ibis:"key"`
+            Password string
+            CreatedAt time.Time
+        }
+
 Connecting to Cassandra
 
 The DialCassandra method on Schema uses gocql to connect to and interact with a live Cassandra
@@ -51,7 +60,7 @@ cluster:
 
 Alternatively, an in-memory fake Cassandra cluster can be used for testing:
 
-        schema.Bind(FakeCassandra())
+        schema.Cluster = FakeCassandra()
 
 Creating and Updating a Live Schema
 
@@ -101,11 +110,11 @@ Once a CF is added to a schema that has been connected to a cluster, you can cal
 to fetch and store values implementing the Row interface. Here is an example of storing data using
 reflection:
 
-        type User struct {Name string, Password string}
+        type User struct {Name string `ibis:"key"`, Password string}
         type UserTable struct {*ibis.CF}
         func (t *UserTable) CF() *ibis.CF {
             t.CF = ibis.ReflectCF(User{})
-            return t.SetPrimaryKey("Name")
+            return t.CF
         }
         type Model struct{Users *UserTable}
         model := &Model{}

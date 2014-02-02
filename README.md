@@ -15,26 +15,26 @@ For certain simple cases, ibis can also automate the creation of these column fa
 addition of new columns at a later date.
 
 ```go
-        userCols := []ibis.Column{
-            ibis.Column{Name: "User", Type: "varchar"},
-            ibis.Column{Name: "Password", Type: "varchar"},
-            ibis.Column{Name: "CreatedAt", Type: "timestamp"},
+        userCols := []*ibis.Column{
+            &ibis.Column{Name: "User", Type: "varchar"},
+            &ibis.Column{Name: "Password", Type: "varchar"},
+            &ibis.Column{Name: "CreatedAt", Type: "timestamp"},
         }
         schema := ibis.NewSchema()
-        schema.AddCF(&ibis.ColumnFamily{Name: "users", Columns: userCols})
+        schema.AddCF(&ibis.CF{Name: "users", Columns: userCols})
 ```
 
 To reduce boilerplate, ibis offers reflection. For example, to generate a schema definition from
 a struct of column families:
 
 ```go
-        userCols := []ibis.Column{
-            ibis.Column{Name: "User", Type: "varchar"},
-            ibis.Column{Name: "Password", Type: "varchar"},
-            ibis.Column{Name: "CreatedAt", Type: "timestamp"},
+        userCols := []ibis.*Column{
+            &ibis.Column{Name: "User", Type: "varchar"},
+            &ibis.Column{Name: "Password", Type: "varchar"},
+            &ibis.Column{Name: "CreatedAt", Type: "timestamp"},
         }
-        type Model struct{Users *ibis.ColumnFamily}
-        model := &Model{Users: &ibis.ColumnFamily{Columns: userCols}}
+        type Model struct{Users *ibis.CF}
+        model := &Model{Users: &ibis.CF{Columns: userCols}}
         schema := ibis.ReflectSchema(model)
 ```
 
@@ -42,9 +42,9 @@ Reflection is also available for defining column families themselves:
 
 ```go
         type User struct {Name string, Password string, CreatedAt time.Time}
-        type UserTable struct {*ibis.ColumnFamily}
-        func (t *UserTable) CF() *ibis.ColumnFamily {
-            t.ColumnFamily = ibis.ReflectColumnFamily(User{})
+        type UserTable struct {*ibis.CF}
+        func (t *UserTable) CF() *ibis.CF {
+            t.CF = ibis.ReflectCF(User{})
             return t.Key("Name")
         }
         type Model struct{Users *UserTable}
@@ -54,6 +54,17 @@ Reflection is also available for defining column families themselves:
 
 Using this reflective approach has the added benefit of eliminating the need to provide marshalling
 code to get data into and out of User values, as will be described shortly.
+
+Note that you must specify the primary key for the column family. This can be done with the
+SetPrimaryKey method, but alternatively you can declare keys in the definition of reflected struct:
+
+```go
+        type User struct {
+            Name string `ibis:"key"`
+            Password string
+            CreatedAt time.Time
+        }
+```
 
 Connecting to Cassandra
 =======================
@@ -69,7 +80,7 @@ cluster:
 Alternatively, an in-memory fake Cassandra cluster can be used for testing:
 
 ```go
-        schema.Bind(FakeCassandra())
+        schema.Cluster = FakeCassandra()
 ```
 
 Creating and Updating a Live Schema
@@ -118,21 +129,21 @@ applied to a map of values. To use ibis at the lowest level, you can implement t
 ```
 
 This is a bit tedious, of course, so ibis generates a Row implementation for you when you use
-ReflectColumnFamily.
+ReflectCF.
 
 Interacting with Data
 =====================
 
-Once a ColumnFamily is added to a schema that has been connected to a cluster, you can call methods
+Once a CF is added to a schema that has been connected to a cluster, you can call methods
 to fetch and store values implementing the Row interface. Here is an example of storing data using
 reflection:
 
 ```go
-        type User struct {Name string, Password string}
-        type UserTable struct {*ibis.ColumnFamily}
-        func (t *UserTable) CF() *ibis.ColumnFamily {
-            t.ColumnFamily = ibis.ReflectColumnFamily(User{})
-            return t.Key("Name")
+        type User struct {Name string `ibis:"key"`, Password string}
+        type UserTable struct {*ibis.CF}
+        func (t *UserTable) CF() *ibis.CF {
+            t.CF = ibis.ReflectCF(User{})
+            return t.CF
         }
         type Model struct{Users *UserTable}
         model := &Model{}
