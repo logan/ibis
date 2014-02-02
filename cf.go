@@ -356,26 +356,37 @@ func (cf *CF) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
 		cql = ins.CQL()
 		ok = true
 	} else {
-		var selectedKeys []string
+		var allDirty bool
 		// If any primary keys are dirty, invalidate the entire object.
 		for _, k := range cf.primaryKey {
 			if mmap[k].Dirty() {
-				selectedKeys = mmap.Keys()
+				allDirty = true
+				mmap[k].MarkClean()
 			}
 		}
-		if selectedKeys == nil {
-			selectedKeys = mmap.DirtyKeys()
-		}
-		if len(selectedKeys) > 0 {
-			upd := Update(cf)
-			for _, k := range selectedKeys {
-				upd.Set(k, mmap[k])
+		if allDirty {
+			selectedKeys := make([]string, len(cf.columns))
+			for i, col := range cf.columns {
+				selectedKeys[i] = col.Name
 			}
-			for _, k := range cf.primaryKey {
-				upd.Where(k+" = ?", mmap[k])
-			}
-			cql = upd.CQL()
+			ins := InsertInto(cf).
+				Keys(selectedKeys...).
+				Values(mmap.InterfacesFor(selectedKeys...)...)
+			cql = ins.CQL()
 			ok = true
+		} else {
+			selectedKeys := mmap.DirtyKeys()
+			if len(selectedKeys) > 0 {
+				upd := Update(cf)
+				for _, k := range selectedKeys {
+					upd.Set(k, mmap[k])
+				}
+				for _, k := range cf.primaryKey {
+					upd.Where(k+" = ?", mmap[k])
+				}
+				cql = upd.CQL()
+				ok = true
+			}
 		}
 	}
 	return

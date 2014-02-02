@@ -126,6 +126,24 @@ func (rv *MarshalledValue) Dirty() bool {
 	return !bytes.Equal(rv.Bytes, rv.OriginalBytes)
 }
 
+// MarkDirty forces the value to appear dirty.
+func (rv *MarshalledValue) MarkDirty() {
+	rv.OriginalBytes = nil
+}
+
+// MarkClean forces the value to appear clean.
+func (rv *MarshalledValue) MarkClean() {
+	rv.OriginalBytes = rv.Bytes
+}
+
+func (rv *MarshalledValue) String() string {
+	var dirty string
+	if rv.Dirty() {
+		dirty = " (dirty)"
+	}
+	return fmt.Sprintf("%+v%s", rv.Bytes, dirty)
+}
+
 // MarshalledMap is a map of column names to marshalled values.
 type MarshalledMap map[string]*MarshalledValue
 
