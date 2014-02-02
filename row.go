@@ -57,9 +57,9 @@ var column_validators = map[string]string{
 // MarshalledValue contains the bytes and type info for a value that has already been marshalled for
 // Cassandra.
 type MarshalledValue struct {
-	Bytes    []byte
-	TypeInfo *gocql.TypeInfo
-	Dirty    bool
+	Bytes         []byte
+	TypeInfo      *gocql.TypeInfo
+	OriginalBytes []byte
 }
 
 // MarshalCQL trivially implements the gocql.Marshaler interface.
@@ -72,6 +72,11 @@ func (rv *MarshalledValue) UnmarshalCQL(info *gocql.TypeInfo, bytes []byte) erro
 	rv.Bytes = bytes
 	rv.TypeInfo = info
 	return nil
+}
+
+// Dirty returns true if a MarshalledValue's Bytes are the same as its OriginalBytes.
+func (rv *MarshalledValue) Dirty() bool {
+	return !bytes.Equal(rv.Bytes, rv.OriginalBytes)
 }
 
 // MarshalledMap is a map of column names to marshalled values.
@@ -125,7 +130,7 @@ func (rv *MarshalledMap) Keys() []string {
 func (rv *MarshalledMap) DirtyKeys() []string {
 	dirties := make([]string, 0, len(*rv))
 	for k, v := range *rv {
-		if v != nil && v.Dirty {
+		if v != nil && v.Dirty() {
 			dirties = append(dirties, k)
 		}
 	}
@@ -276,7 +281,6 @@ func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
 			mmap[col.Name] = &MarshalledValue{
 				Bytes:    marshalled,
 				TypeInfo: col.typeInfo,
-				Dirty:    true,
 			}
 		}
 	}

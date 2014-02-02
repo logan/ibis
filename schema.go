@@ -1,6 +1,5 @@
 package ibis
 
-import "errors"
 import "reflect"
 import "strings"
 
@@ -23,7 +22,8 @@ func NewSchema() *Schema {
 		CFs:        make(Keyspace),
 		nextTypeID: 1,
 	}
-	schema.ColumnTags.Register("", applyStandardColumnTag)
+	var plugin defaultPlugin
+	plugin.RegisterColumnTags(&schema.ColumnTags)
 	return schema
 }
 
@@ -34,6 +34,10 @@ func (s *Schema) AddCF(cf *CF) {
 	if cf.typeID == 0 {
 		cf.typeID = s.nextTypeID
 		s.nextTypeID++
+	}
+	var plugin Plugin
+	if cf.GetProvider(&plugin) {
+		plugin.RegisterColumnTags(&s.ColumnTags)
 	}
 }
 
@@ -166,18 +170,4 @@ func ReflectSchema(model interface{}) *Schema {
 		}
 	}
 	return schema
-}
-
-func applyStandardColumnTag(tag string, cf *CF, col *Column) error {
-	switch {
-	case tag == "key":
-		if cf.primaryKey == nil {
-			cf.primaryKey = []string{col.Name}
-		} else {
-			cf.primaryKey = append(cf.primaryKey, col.Name)
-		}
-		return nil
-	default:
-		return errors.New("invalid column tag: " + tag)
-	}
 }

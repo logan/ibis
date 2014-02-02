@@ -55,7 +55,7 @@ func TestMarshalledMapDirtyKeys(t *testing.T) {
 
 	expect := func(expected ...string) (string, bool) {
 		received := mmap.DirtyKeys()
-		msg := fmt.Sprintf("\nexpected: %+v\nreceived: %+v", received, expected)
+		msg := fmt.Sprintf("\nexpected: %+v\nreceived: %+v", expected, received)
 		if len(received) == 0 {
 			return msg, len(expected) == 0
 		}
@@ -65,10 +65,11 @@ func TestMarshalledMapDirtyKeys(t *testing.T) {
 	if msg, ok := expect(); !ok {
 		t.Error(msg)
 	}
-	mmap["A"] = &MarshalledValue{Dirty: true}
+	mmap["A"] = &MarshalledValue{Bytes: []byte{0}}
 	mmap["B"] = nil
-	mmap["C"] = &MarshalledValue{Dirty: false}
-	mmap["D"] = &MarshalledValue{Dirty: true}
+	mmap["C"] = &MarshalledValue{Bytes: []byte{0}, OriginalBytes: []byte{0}}
+	mmap["D"] = &MarshalledValue{Bytes: []byte{0}, OriginalBytes: []byte{1}}
+	mmap["E"] = &MarshalledValue{}
 	if msg, ok := expect("A", "D"); !ok {
 		t.Error(msg)
 	}

@@ -49,8 +49,8 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 }
 
 type crudRow struct {
-	Partition string
-	Cluster   int64
+	Partition string `ibis:"key"`
+	Cluster   int64  `ibis:"key"`
 	Value     string
 }
 
@@ -60,7 +60,7 @@ type crudTable struct {
 
 func (t *crudTable) NewCF() *CF {
 	t.CF = ReflectCF(crudRow{})
-	return t.cf.SetPrimaryKey("Partition", "Cluster")
+	return t.cf
 }
 
 func (t *crudTable) crud() *crudTable { return t }
@@ -188,8 +188,11 @@ func TestPrecommitHooks(t *testing.T) {
 	defer model.Close()
 
 	partErr := errors.New("partErr")
-	hook := func(row interface{}) ([]CQL, error) {
-		crud := row.(*crudRow)
+	hook := func(mmap MarshalledMap) ([]CQL, error) {
+		crud := &crudRow{}
+		if err := model.crudTable.unmarshal(crud, mmap); err != nil {
+			return nil, err
+		}
 		if crud.Partition == "" {
 			return nil, partErr
 		}

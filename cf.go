@@ -16,7 +16,7 @@ var (
 )
 
 // A type of function that produces CQL statements to execute before committing data.
-type PrecommitHook func(interface{}) ([]CQL, error)
+type PrecommitHook func(MarshalledMap) ([]CQL, error)
 
 // CFProvider is an interface for producing and configuring a column family definition. Use
 // CFProvider when specifying a schema struct for ReflectSchema(). Exported fields that implement
@@ -328,11 +328,11 @@ func (cf *CF) MakeCommitCAS(row interface{}) (CQL, error) {
 	return cql, nil
 }
 
-func (cf *CF) applyPrecommitHooks(row interface{}) ([]CQL, error) {
+func (cf *CF) applyPrecommitHooks(mmap MarshalledMap) ([]CQL, error) {
 	total := make([]CQL, 0)
 	if cf.precommitHooks != nil {
 		for _, hook := range cf.precommitHooks {
-			cqls, err := hook(row)
+			cqls, err := hook(mmap)
 			if err != nil {
 				return nil, err
 			}
@@ -359,7 +359,7 @@ func (cf *CF) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
 		var selectedKeys []string
 		// If any primary keys are dirty, invalidate the entire object.
 		for _, k := range cf.primaryKey {
-			if mmap[k].Dirty {
+			if mmap[k].Dirty() {
 				selectedKeys = mmap.Keys()
 			}
 		}
@@ -389,7 +389,7 @@ func (cf *CF) commit(row interface{}, cas bool) error {
 
 	// Generate CQL from precommit hooks and execute it in a batch.
 	// TODO: Include commit in the same batch.
-	cqls, err := cf.applyPrecommitHooks(row)
+	cqls, err := cf.applyPrecommitHooks(mmap)
 	if err != nil {
 		return err
 	}
@@ -523,35 +523,4 @@ func ReflectCF(template interface{}) *CF {
 	cf := &CF{}
 	cf.rowReflector = newRowReflector(cf, template)
 	return cf
-}
-
-type ColumnTagApplier func(tagValue string, cf *CF, col *Column) error
-
-type ColumnTags struct {
-	tags map[string]ColumnTagApplier
-}
-
-func (t *ColumnTags) Register(name string, applier ColumnTagApplier) {
-	if t.tags == nil {
-		t.tags = make(map[string]ColumnTagApplier)
-	}
-	t.tags[name] = applier
-}
-
-func (t *ColumnTags) applyAll(tag reflect.StructTag, cf *CF, col *Column) []error {
-	errors := make([]error, 0)
-	for name, applier := range t.tags {
-		if name == "" {
-			name = "ibis"
-		} else {
-			name = "ibis." + name
-		}
-		val := tag.Get(name)
-		if val != "" {
-			if err := applier(val, cf, col); err != nil {
-				errors = append(errors, err)
-			}
-		}
-	}
-	return errors
 }

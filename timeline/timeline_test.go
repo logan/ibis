@@ -119,3 +119,20 @@ func TestIndex(t *testing.T) {
 		t.Error(msg)
 	}
 }
+
+func TestPlugin(t *testing.T) {
+	type Row struct {
+		ibis.SeqID  `ibis:"key"`
+		Name        string
+		CreatedAt   time.Time `ibis.timeline:"All, ByName(Name)"`
+		PublishedAt time.Time `ibis.timeline:"Published, PublishedByName(Name)"`
+	}
+
+	type Model struct {
+		Indexes *IndexTable
+		Rows    *CF
+	}
+
+	model := &Model{ibis.ReflectCF(Row{})}
+	schema := ibis.ReflectSchema(model)
+}

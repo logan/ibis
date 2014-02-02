@@ -5,6 +5,9 @@ import "encoding/json"
 import "fmt"
 import "reflect"
 import "strings"
+import "time"
+
+import "tux21b.org/v1/gocql"
 
 import "github.com/logan/ibis"
 
@@ -188,4 +191,81 @@ func (scanner *IndexScanner) ScanPage(x interface{}) bool {
 		sliceValue.Index(i).Set(reflect.ValueOf(row))
 	}
 	return scanner.err == nil
+}
+
+type TimelinePlugin struct {
+	*IndexTable
+
+	// TODO: Fix this type it's ridiculous
+	timelineDefs map[string]map[string][]timelineDef
+}
+
+func (plugin *TimelinePlugin) NewCF() *ibis.CF {
+	plugin.IndexTable = new(IndexTable)
+	cf := plugin.IndexTable.NewCF()
+	cf.Provide(ibis.Plugin(plugin))
+	return cf
+}
+
+func (plugin *TimelinePlugin) RegisterColumnTags(tags *ibis.ColumnTags) {
+	tags.Register("timeline", plugin)
+}
+
+func (plugin *TimelinePlugin) ApplyTag(value string, cf *ibis.CF, col *ibis.Column) error {
+	defs, err := parseTimelineDefs(value)
+	if defs != nil {
+		if plugin.timelineDefs == nil {
+			plugin.timelineDefs = make(map[string]map[string][]timelineDef)
+		}
+		_, ok := plugin.timelineDefs[cf.Name()]
+		if !ok {
+			plugin.timelineDefs[cf.Name()] = make(map[string][]timelineDef)
+			cf.Precommit(plugin.precommit)
+		}
+		plugin.timelineDefs[cf.Name()][col.Name] = defs
+	}
+	fmt.Printf("timelines: %+v\n", plugin.timelineDefs)
+	return err
+}
+
+func (plugin *TimelinePlugin) precommit(mmap ibis.MarshalledMap) ([]ibis.CQL, error) {
+	cqls := make([]ibis.CQL, 0)
+	for colName, _ := range plugin.timelineDefs {
+		mv := mmap[colName]
+		if mv.Dirty() && mv.TypeInfo == ibis.TITimestamp {
+			var newT, oldT time.Time
+			if mv.Bytes != nil {
+				if err := gocql.Unmarshal(ibis.TITimestamp, mv.Bytes, &newT); err != nil {
+					return nil, err
+				}
+			}
+			if mv.OriginalBytes != nil {
+				if err := gocql.Unmarshal(ibis.TITimestamp, mv.OriginalBytes, &oldT); err != nil {
+					return nil, err
+				}
+			}
+			// get the seqid
+			cqls = append(cqls, plugin.onTimestampChange("", colName, oldT, newT)...)
+		}
+	}
+	return cqls, nil
+}
+
+func (plugin *TimelinePlugin) onTimestampChange(seqid ibis.SeqID, colName string,
+	oldT, newT time.Time) []ibis.CQL {
+	/*
+
+	   cqls := make([]ibis.CQL, 0)
+	   defs := plugin.timelineDefs[colName]
+	*/
+	// TODO: if !oldT.IsZero() { /* remove */ }
+	/*
+	   if !newT.IsZero() {
+	       for _, def := range defs {
+	           idx := plugin.IndexTable.Index(def.keys()...)
+	           cqls = append(cqls, idx.MakeAdd(seqid,
+	       }
+	   }
+	*/
+	return []ibis.CQL{}
 }
