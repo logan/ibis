@@ -14,6 +14,10 @@ func UUIDFromTime(t time.Time) TimeUUID {
     return TimeUUID(gocql.UUIDFromTime(t))
 }
 
+func (id TimeUUID) String() string {
+    return gocql.UUID(id).String()
+}
+
 func (id TimeUUID) IsSet() bool {
     var zero gocql.UUID
     return !bytes.Equal(gocql.UUID(id).Bytes(), zero.Bytes())

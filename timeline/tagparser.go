@@ -58,6 +58,7 @@ func (t token) failf(format string, values ...interface{}) token {
 
 func (t token) advance(n int) token {
 	u := t
+    u.runes = u.runes[n:]
 	u.pos += n
 	return u
 }
@@ -72,12 +73,8 @@ func pTag(t token) token {
 		return t
 	}
 	id := t.ctx.(string)
-	u := pRune(t)
+	u := pRune(t, '(')
 	if u.err != nil {
-		return u
-	}
-	c, ok := u.ctx.(rune)
-	if !ok || c != '(' {
 		return t.with(timelineDef{name: id})
 	}
 
@@ -89,48 +86,42 @@ func pTag(t token) token {
 	for i, ctx := range ctxs {
 		def.by[i] = ctx.(string)
 	}
-	return u.with(def)
+
+    return pRune(u, ')').with(def)
 }
 
 func pIdent(t token) token {
-	if t = pRune(t); t.err != nil {
-		return t
-	}
-	if t.eof {
-		return t.fail("expected identifier")
-	}
-	start := t.pos
-	stop := start
-	for stop < len(t.runes) {
+    var start int
+    for start = 0; start < len(t.runes) && unicode.IsSpace(t.runes[start]); start++ { }
+    var stop int
+	for stop = start; stop < len(t.runes); stop++ {
 		c := t.runes[stop]
 		if c != '_' && !unicode.IsLetter(c) && !unicode.IsDigit(c) {
 			break
 		}
-		stop++
 	}
-	return t.advance(stop - start).with(string(t.runes[start:stop]))
+    if start == stop {
+        return t.fail("expected identifier")
+    }
+	return t.advance(stop).with(string(t.runes[start:stop]))
 }
 
 func pComma(t token) token {
-	u := pRune(t)
-	if u.err != nil {
-		return t
-	}
-	if u.eof {
-		return t.fail("expected comma")
-	}
-	c := u.ctx.(rune)
-	if c != ',' {
-		return t.failf("expected comma, got %#v", c)
-	}
-	return u
+    return pRune(t, ',')
 }
 
-func pRune(t token) token {
-	if t.pos >= len(t.runes) {
-		return pEof(t)
-	}
-	return t.advance(1).with(t.runes[t.pos])
+func pRune(t token, c rune) token {
+    for len(t.runes) > 0 && unicode.IsSpace(t.runes[0]) {
+        t.runes = t.runes[1:]
+    }
+    if len(t.runes) == 0 {
+        t.eof = true
+        return t.failf("tag terminated early, expected %c", c)
+    }
+    if t.runes[0] != c {
+        return t.failf("expected '%c', got '%c'", c, t.runes[0])
+    }
+    return t.advance(1).with(c)
 }
 
 func pEof(t token) token {
@@ -149,7 +140,7 @@ func list(rep, sep parser, t token) token {
 		return t.with(ctxs)
 	}
 	t = u
-	for t.err != nil {
+	for t.err == nil {
 		ctxs = append(ctxs, t.ctx)
 		if u = sep(t); u.err != nil {
 			break

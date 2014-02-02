@@ -85,3 +85,18 @@ func (tc *testConn) Close() {
 	cql.Cluster(tc)
 	cql.Query().Exec()
 }
+
+func ReflectTestSchema(t *testing.T, model interface{}) *Schema {
+    schema := ReflectSchema(model)
+	schema.Cluster = NewTestConn(t)
+
+	var err error
+	if schema.SchemaUpdates, err = DiffLiveSchema(schema.Cluster, schema); err != nil {
+		t.Fatal(err)
+	}
+	if err = schema.ApplySchemaUpdates(); err != nil {
+		t.Fatal(err)
+	}
+
+    return schema
+}

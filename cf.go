@@ -13,10 +13,11 @@ var (
 	ErrTableNotBound   = errors.New("table not connected to a cluster")
 	ErrInvalidType     = errors.New("invalid row type")
 	ErrNothingToCommit = errors.New("nothing to commit")
+    ErrInvalidKey      = errors.New("invalid key")
 )
 
 // A type of function that produces CQL statements to execute before committing data.
-type PrecommitHook func(MarshalledMap) ([]CQL, error)
+type PrecommitHook func(interface{}, MarshalledMap) ([]CQL, error)
 
 // CFProvider is an interface for producing and configuring a column family definition. Use
 // CFProvider when specifying a schema struct for ReflectSchema(). Exported fields that implement
@@ -255,6 +256,9 @@ func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 	if !cf.IsBound() {
 		return ErrTableNotBound
 	}
+    if len(key) != len(cf.primaryKey) {
+        return ErrInvalidKey
+    }
 
 	colnames := make([]string, len(cf.columns))
 	for i, col := range cf.columns {
@@ -328,11 +332,11 @@ func (cf *CF) MakeCommitCAS(row interface{}) (CQL, error) {
 	return cql, nil
 }
 
-func (cf *CF) applyPrecommitHooks(mmap MarshalledMap) ([]CQL, error) {
+func (cf *CF) applyPrecommitHooks(row interface{}, mmap MarshalledMap) ([]CQL, error) {
 	total := make([]CQL, 0)
 	if cf.precommitHooks != nil {
 		for _, hook := range cf.precommitHooks {
-			cqls, err := hook(mmap)
+			cqls, err := hook(row, mmap)
 			if err != nil {
 				return nil, err
 			}
@@ -400,7 +404,7 @@ func (cf *CF) commit(row interface{}, cas bool) error {
 
 	// Generate CQL from precommit hooks and execute it in a batch.
 	// TODO: Include commit in the same batch.
-	cqls, err := cf.applyPrecommitHooks(mmap)
+	cqls, err := cf.applyPrecommitHooks(row, mmap)
 	if err != nil {
 		return err
 	}

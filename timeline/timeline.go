@@ -11,10 +11,12 @@ import "tux21b.org/v1/gocql"
 
 import "github.com/logan/ibis"
 
+var Fuzz = 5 * time.Minute
+
 type Entry struct {
-	Partition  string `ibis:"key"`
-	ibis.SeqID `ibis:"key"`
-	Bytes      []byte
+	Partition string        `ibis:"key"`
+	ID        ibis.TimeUUID `ibis:"key"`
+	Bytes     []byte
 }
 
 func (e *Entry) encodePartition(name string) {
@@ -42,7 +44,15 @@ func (t *IndexTable) NewCF() *ibis.CF {
 }
 
 func (t *IndexTable) Index(keys ...string) *Index {
-	return &Index{Table: t, Name: strings.Join(keys, "")}
+    var name string
+    if len(keys) > 0 {
+        if len(keys) > 1 {
+            name = keys[0] + ":" + strings.Join(keys[1:], "")
+        } else {
+            name = keys[0]
+        }
+    }
+	return &Index{Table: t, Name: name}
 }
 
 type IndexProvider interface {
@@ -54,20 +64,20 @@ type Index struct {
 	Name  string
 }
 
-func (idx *Index) Add(seqid ibis.SeqID, v interface{}) error {
-	cql, err := idx.MakeAdd(seqid, v)
+func (idx *Index) Add(uuid ibis.TimeUUID, v interface{}) error {
+	cql, err := idx.MakeAdd(uuid, v)
 	if err != nil {
 		return err
 	}
 	return cql.Query().Exec()
 }
 
-func (idx *Index) MakeAdd(seqid ibis.SeqID, v interface{}) (ibis.CQL, error) {
+func (idx *Index) MakeAdd(uuid ibis.TimeUUID, v interface{}) (ibis.CQL, error) {
 	enc, err := json.Marshal(v)
 	if err != nil {
 		return ibis.CQL{}, err
 	}
-	entry := &Entry{SeqID: seqid.Pad(), Bytes: enc}
+	entry := &Entry{ID: uuid, Bytes: enc}
 	entry.encodePartition(idx.Name)
 	// TODO: write with timestamp
 	return idx.Table.MakeCommit(entry)
@@ -82,7 +92,7 @@ type EntryChannel chan *Entry
 
 type IndexScanner struct {
 	EntryChannel
-	since     ibis.SeqID
+	since     ibis.TimeUUID
 	fetched   int
 	limit     int
 	index     *Index
@@ -96,11 +106,8 @@ func NewIndexScanner(index *Index) *IndexScanner {
 	return scanner
 }
 
-func (scanner *IndexScanner) Since(seqid ibis.SeqID) *IndexScanner {
-	if seqid != "" {
-		seqid = seqid.Pad()
-	}
-	scanner.since = seqid
+func (scanner *IndexScanner) Since(uuid ibis.TimeUUID) *IndexScanner {
+	scanner.since = uuid
 	return scanner
 }
 
@@ -124,22 +131,13 @@ func (scanner *IndexScanner) Error() error {
 }
 
 func (scanner *IndexScanner) start() ibis.CFQuery {
-	if scanner.since == "" {
-		// If no since is given, generate the next SeqID to start a scan from right now.
-		var gen ibis.SeqIDGenerator
-		if scanner.index.Table.GetProvider(&gen) {
-			next, err := gen.NewSeqID()
-			if err == nil {
-				scanner.since = next.Pad()
-			} else {
-				scanner.err = err
-			}
-		}
+	if !scanner.since.IsSet() {
+		scanner.since = ibis.UUIDFromTime(time.Now().Add(Fuzz))
 	}
 	cql := ibis.Select().From(scanner.index.Table.CF).
 		Where("Partition = ?", scanner.index.Name).
-		Where("SeqID < ?", scanner.since).
-		OrderBy("SeqID DESC")
+		Where("ID < ?", scanner.since).
+		OrderBy("ID DESC")
 	if scanner.limit != 0 {
 		cql.Limit(scanner.limit)
 	}
@@ -156,7 +154,7 @@ func (scanner *IndexScanner) scan() {
 			scanner.err = scanner.query.Close()
 			return
 		}
-		scanner.since = entry.SeqID
+		scanner.since = entry.ID
 		scanner.EntryChannel <- entry
 	}
 }
@@ -196,14 +194,14 @@ func (scanner *IndexScanner) ScanPage(x interface{}) bool {
 type TimelinePlugin struct {
 	*IndexTable
 
-	// TODO: Fix this type it's ridiculous
-	timelineDefs map[string]map[string][]timelineDef
+	precommitters map[string]*timelinePrecommitter
 }
 
 func (plugin *TimelinePlugin) NewCF() *ibis.CF {
 	plugin.IndexTable = new(IndexTable)
 	cf := plugin.IndexTable.NewCF()
 	cf.Provide(ibis.Plugin(plugin))
+    cf.Provide(IndexProvider(plugin))
 	return cf
 }
 
@@ -214,58 +212,78 @@ func (plugin *TimelinePlugin) RegisterColumnTags(tags *ibis.ColumnTags) {
 func (plugin *TimelinePlugin) ApplyTag(value string, cf *ibis.CF, col *ibis.Column) error {
 	defs, err := parseTimelineDefs(value)
 	if defs != nil {
-		if plugin.timelineDefs == nil {
-			plugin.timelineDefs = make(map[string]map[string][]timelineDef)
+		if plugin.precommitters == nil {
+			plugin.precommitters = make(map[string]*timelinePrecommitter)
 		}
-		_, ok := plugin.timelineDefs[cf.Name()]
+		hook, ok := plugin.precommitters[cf.Name()]
 		if !ok {
-			plugin.timelineDefs[cf.Name()] = make(map[string][]timelineDef)
-			cf.Precommit(plugin.precommit)
+			hook = &timelinePrecommitter{cf, plugin.IndexTable, make(map[string][]timelineDef)}
+			cf.Precommit(hook.precommit)
+			plugin.precommitters[cf.Name()] = hook
 		}
-		plugin.timelineDefs[cf.Name()][col.Name] = defs
+		hook.timelineDefs[col.Name] = defs
 	}
-	fmt.Printf("timelines: %+v\n", plugin.timelineDefs)
 	return err
 }
 
-func (plugin *TimelinePlugin) precommit(mmap ibis.MarshalledMap) ([]ibis.CQL, error) {
+type timelinePrecommitter struct {
+	*ibis.CF
+	*IndexTable
+	timelineDefs map[string][]timelineDef
+}
+
+func (hook *timelinePrecommitter) precommit(row interface{}, mmap ibis.MarshalledMap) (
+	[]ibis.CQL, error) {
 	cqls := make([]ibis.CQL, 0)
-	for colName, _ := range plugin.timelineDefs {
+	for colName, defs := range hook.timelineDefs {
 		mv := mmap[colName]
-		if mv.Dirty() && mv.TypeInfo == ibis.TITimestamp {
-			var newT, oldT time.Time
+		if mv.Dirty() && mv.TypeInfo == ibis.TIUUID {
+			var newU, oldU gocql.UUID
 			if mv.Bytes != nil {
-				if err := gocql.Unmarshal(ibis.TITimestamp, mv.Bytes, &newT); err != nil {
+				if err := gocql.Unmarshal(ibis.TIUUID, mv.Bytes, &newU); err != nil {
 					return nil, err
 				}
 			}
 			if mv.OriginalBytes != nil {
-				if err := gocql.Unmarshal(ibis.TITimestamp, mv.OriginalBytes, &oldT); err != nil {
+				if err := gocql.Unmarshal(ibis.TIUUID, mv.OriginalBytes, &oldU); err != nil {
 					return nil, err
 				}
 			}
-			// get the seqid
-			cqls = append(cqls, plugin.onTimestampChange("", colName, oldT, newT)...)
+			cs, err := hook.onUUIDChange(row, mmap, ibis.TimeUUID(oldU), ibis.TimeUUID(newU), defs)
+			if err != nil {
+				return nil, err
+			}
+			cqls = append(cqls, cs...)
 		}
 	}
 	return cqls, nil
 }
 
-func (plugin *TimelinePlugin) onTimestampChange(seqid ibis.SeqID, colName string,
-	oldT, newT time.Time) []ibis.CQL {
-	/*
-
-	   cqls := make([]ibis.CQL, 0)
-	   defs := plugin.timelineDefs[colName]
-	*/
-	// TODO: if !oldT.IsZero() { /* remove */ }
-	/*
-	   if !newT.IsZero() {
-	       for _, def := range defs {
-	           idx := plugin.IndexTable.Index(def.keys()...)
-	           cqls = append(cqls, idx.MakeAdd(seqid,
-	       }
-	   }
-	*/
-	return []ibis.CQL{}
+func (hook *timelinePrecommitter) onUUIDChange(row interface{}, mmap ibis.MarshalledMap,
+        oldU, newU ibis.TimeUUID, defs []timelineDef) ([]ibis.CQL, error) {
+	cqls := make([]ibis.CQL, 0)
+    if newU.IsSet() {
+		for _, def := range defs {
+            keys := []string{def.name}
+            if def.by != nil {
+                for _, k := range def.by {
+                    var key string
+                    mv := mmap[k]
+                    if mv != nil && mv.TypeInfo == ibis.TIVarchar {
+                        if err := gocql.Unmarshal(ibis.TIVarchar, mv.Bytes, &key); err != nil {
+                            return nil, err
+                        }
+                    }
+                    keys = append(keys, key)
+                }
+            }
+			idx := hook.IndexTable.Index(keys...)
+			cql, err := idx.MakeAdd(newU, row)
+			if err != nil {
+				return nil, err
+			}
+			cqls = append(cqls, cql)
+		}
+	}
+	return cqls, nil
 }

@@ -1,9 +1,10 @@
 package timeline
 
-import "github.com/logan/ibis"
-
 import "fmt"
 import "testing"
+import "time"
+
+import "github.com/logan/ibis"
 
 type testModel struct {
 	cluster   ibis.Cluster
@@ -35,13 +36,12 @@ func newTestModel(t *testing.T) *testModel {
 	return model
 }
 
-func scanAllEntries(idx *Index, since ...string) ([]*Entry, error) {
+func scanAllEntries(idx *Index, since ...ibis.TimeUUID) ([]*Entry, error) {
 	scanner := idx.Scanner()
 	if len(since) > 0 {
-		scanner.Since(ibis.SeqID(since[0]))
+		scanner.Since(since[0])
 	}
 	// read in two at a time
-	//entries := make([]*Entry, 0)
 	var entries []*Entry
 	page := make([]*Entry, 0, 2)
 	scanner.Start()
@@ -51,18 +51,18 @@ func scanAllEntries(idx *Index, since ...string) ([]*Entry, error) {
 	return entries, scanner.Error()
 }
 
-func checkEntries(entries []*Entry, seqids ...string) (string, bool) {
-	received := make([]ibis.SeqID, len(entries))
+func checkEntries(entries []*Entry, expected ...ibis.TimeUUID) (string, bool) {
+	received := make([]ibis.TimeUUID, len(entries))
 	for i, entry := range entries {
-		received[i] = entry.SeqID
+		received[i] = entry.ID
 	}
-	if len(received) != len(seqids) {
-		return fmt.Sprintf("expected %d entries, received %d: %s", len(seqids), len(received),
+	if len(received) != len(expected) {
+		return fmt.Sprintf("expected %d entries, received %d: %s", len(expected), len(received),
 			received), false
 	}
-	for i, seqid := range received {
-		if seqid != ibis.SeqID(seqids[i]).Pad() {
-			return fmt.Sprintf("entries have different SeqIDs than expected: %s", received), false
+	for i, uuid := range received {
+		if uuid != expected[i] {
+			return fmt.Sprintf("\nexpected: %+v\nreceived: %+v", expected, received), false
 		}
 	}
 	return "", true
@@ -70,11 +70,18 @@ func checkEntries(entries []*Entry, seqids ...string) (string, bool) {
 
 func TestIndex(t *testing.T) {
 	model := newTestModel(t)
-	defer model.Close()
+	//defer model.Close()
+
+	now := time.Now()
+	uuids := []ibis.TimeUUID{
+		ibis.UUIDFromTime(now.Add(-3 * time.Minute)),
+		ibis.UUIDFromTime(now.Add(-2 * time.Minute)),
+		ibis.UUIDFromTime(now.Add(-1 * time.Minute)),
+	}
 
 	idx := model.Indexes.Index("Posts", "Published")
-	if idx.Name != "PostsPublished" {
-		t.Error("expected PostsPublished, got", idx.Name)
+	if idx.Name != "Posts:Published" {
+		t.Error("expected Posts:Published, got", idx.Name)
 	}
 
 	entries, err := scanAllEntries(idx)
@@ -85,54 +92,72 @@ func TestIndex(t *testing.T) {
 		t.Errorf("how did these get here? %+v", entries)
 	}
 
-	newSeqID := func() ibis.SeqID {
-		var gen ibis.SeqIDGenerator
-		if !model.Indexes.GetProvider(&gen) {
-			t.Fatal("expected SeqIDGenerator to be provided")
+	for i, uuid := range uuids {
+		if err := idx.Add(uuid, i); err != nil {
+			t.Error(err)
 		}
-		seqid, _ := gen.NewSeqID()
-		return seqid
-	}
-	if err := idx.Add(newSeqID(), []byte{0}); err != nil {
-		t.Error(err)
-	}
-	if err := idx.Add(newSeqID(), []byte{1}); err != nil {
-		t.Error(err)
-	}
-	if err := idx.Add(newSeqID(), []byte{2}); err != nil {
-		t.Error(err)
 	}
 
 	entries, err = scanAllEntries(idx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if msg, ok := checkEntries(entries, "1002", "1001", "1000"); !ok {
+	if msg, ok := checkEntries(entries, uuids[2], uuids[1], uuids[0]); !ok {
 		t.Error(msg)
 	}
 
-	entries, err = scanAllEntries(idx, "1002")
+	entries, err = scanAllEntries(idx, uuids[2])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if msg, ok := checkEntries(entries, "1001", "1000"); !ok {
+	if msg, ok := checkEntries(entries, uuids[1], uuids[0]); !ok {
 		t.Error(msg)
 	}
 }
 
 func TestPlugin(t *testing.T) {
 	type Row struct {
-		ibis.SeqID  `ibis:"key"`
-		Name        string
-		CreatedAt   time.Time `ibis.timeline:"All, ByName(Name)"`
-		PublishedAt time.Time `ibis.timeline:"Published, PublishedByName(Name)"`
+		Name      string        `ibis:"key"`
+		Created   ibis.TimeUUID `ibis.timeline:"AllRows, RowsBy(Name)"`
+		Published ibis.TimeUUID `ibis.timeline:"PublishedRows, RowsPublishedBy(Name)"`
 	}
 
 	type Model struct {
-		Indexes *IndexTable
-		Rows    *CF
+		Indexes *TimelinePlugin
+		Rows    *ibis.CF
 	}
 
-	model := &Model{ibis.ReflectCF(Row{})}
-	schema := ibis.ReflectSchema(model)
+	model := &Model{Rows: ibis.ReflectCF(Row{})}
+    //schema := ibis.ReflectTestSchema(t, model)
+    //defer schema.Cluster.Close()
+    ibis.ReflectTestSchema(t, model)
+
+    uuid1 := ibis.UUIDFromTime(time.Now())
+    row := &Row{Name: "test", Created: uuid1}
+    if err := model.Rows.CommitCAS(row); err != nil {
+        t.Fatal(err)
+    }
+
+    var entry Entry
+    if err := model.Indexes.CF.LoadByKey(&entry, "AllRows", uuid1); err != nil {
+        t.Fatal(err)
+    }
+    if uuid1 != entry.ID {
+        t.Errorf("expected %s, got %s", uuid1, entry.ID)
+    }
+    var indexedRow Row
+    if err := entry.Decode(&indexedRow); err != nil {
+        t.Fatal(err)
+    }
+    if row.Name != indexedRow.Name {
+        t.Errorf("expected %v, got %v", row, indexedRow)
+    }
+
+    entry = Entry{}
+    if err := model.Indexes.CF.LoadByKey(&entry, "RowsBy:test", uuid1); err != nil {
+        t.Fatal(err)
+    }
+    if uuid1 != entry.ID {
+        t.Errorf("expected %s, got %s", uuid1, entry.ID)
+    }
 }

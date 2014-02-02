@@ -188,8 +188,8 @@ func TestPrecommitHooks(t *testing.T) {
 	defer model.Close()
 
 	partErr := errors.New("partErr")
-	hook := func(mmap MarshalledMap) ([]CQL, error) {
-		crud := &crudRow{}
+	hook := func(row interface{}, mmap MarshalledMap) ([]CQL, error) {
+		crud := row.(*crudRow)
 		if err := model.crudTable.unmarshal(crud, mmap); err != nil {
 			return nil, err
 		}
