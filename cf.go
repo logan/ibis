@@ -63,6 +63,10 @@ func (cf *CF) Cluster() Cluster {
 	return nil
 }
 
+func (cf *CF) Name() string {
+	return cf.name
+}
+
 // SetPrimaryKey configures the primary key for this column family. It takes names of columns as
 // strings. At least one argument is required, specifying the partition key. Zero or more additional
 // arguments specify the name of the clustering columns.
