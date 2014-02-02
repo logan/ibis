@@ -17,9 +17,10 @@ var columnTypeMap = map[string]string{
 	"bool":                        "boolean",
 	"float64":                     "double",
 	"github.com/logan/ibis.SeqID": "varchar",
-	"int64":     "bigint",
-	"string":    "varchar",
-	"time.Time": "timestamp",
+	"tux21b.org/v1/gocql.UUID":    "uuid",
+	"int64":                       "bigint",
+	"string":                      "varchar",
+	"time.Time":                   "timestamp",
 }
 
 var (
@@ -30,6 +31,7 @@ var (
 	TIBigInt    = &gocql.TypeInfo{Type: gocql.TypeBigInt}
 	TIVarchar   = &gocql.TypeInfo{Type: gocql.TypeVarchar}
 	TITimestamp = &gocql.TypeInfo{Type: gocql.TypeTimestamp}
+	TIUUID      = &gocql.TypeInfo{Type: gocql.TypeUUID}
 )
 
 var typeInfoMap = map[string]*gocql.TypeInfo{
@@ -39,6 +41,7 @@ var typeInfoMap = map[string]*gocql.TypeInfo{
 	"bigint":    TIBigInt,
 	"varchar":   TIVarchar,
 	"timestamp": TITimestamp,
+	"uuid":      TIUUID,
 }
 
 var column_validators = map[string]string{
@@ -48,6 +51,7 @@ var column_validators = map[string]string{
 	"org.apache.cassandra.db.marshal.LongType":      "bigint",
 	"org.apache.cassandra.db.marshal.TimestampType": "timestamp",
 	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
+	"org.apache.cassandra.db.marshal.UUIDType":      "uuid",
 }
 
 // MarshalledValue contains the bytes and type info for a value that has already been marshalled for

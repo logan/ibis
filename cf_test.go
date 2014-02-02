@@ -6,6 +6,8 @@ import "reflect"
 import "testing"
 import "time"
 
+import "tux21b.org/v1/gocql"
+
 func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 	type table struct {
 		Str    string
@@ -15,6 +17,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 		Time   time.Time
 		Blob   []byte
 		SeqID  SeqID
+		UUID   gocql.UUID
 	}
 
 	cf := &CF{name: "test"}
@@ -30,7 +33,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 	}
 
 	if msg, ok := expect("CREATE TABLE test (Str varchar, Int bigint, Bool boolean," +
-		" Double double, Time timestamp, Blob blob, SeqID varchar," +
+		" Double double, Time timestamp, Blob blob, SeqID varchar, UUID uuid," +
 		" PRIMARY KEY (Str))"); !ok {
 		t.Error(msg)
 	}
@@ -39,7 +42,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 	cf.typeID = 8
 
 	if msg, ok := expect("CREATE TABLE test (Double double, Time timestamp, Blob blob," +
-		" Str varchar, Int bigint, Bool boolean, SeqID varchar," +
+		" Str varchar, Int bigint, Bool boolean, SeqID varchar, UUID uuid," +
 		" PRIMARY KEY (Double, Time, Blob)) WITH comment='8'"); !ok {
 		t.Error(msg)
 	}
