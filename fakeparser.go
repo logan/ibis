@@ -947,6 +947,8 @@ func isKeyword(id string) bool {
 		return true
 	case "blob":
 		return true
+	case "timeuuid":
+		return true
 	default:
 		return false
 	}

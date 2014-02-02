@@ -33,7 +33,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 	}
 
 	if msg, ok := expect("CREATE TABLE test (Str varchar, Int bigint, Bool boolean," +
-		" Double double, Time timestamp, Blob blob, SeqID varchar, UUID uuid," +
+		" Double double, Time timestamp, Blob blob, SeqID varchar, UUID timeuuid," +
 		" PRIMARY KEY (Str))"); !ok {
 		t.Error(msg)
 	}
@@ -42,7 +42,7 @@ func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
 	cf.typeID = 8
 
 	if msg, ok := expect("CREATE TABLE test (Double double, Time timestamp, Blob blob," +
-		" Str varchar, Int bigint, Bool boolean, SeqID varchar, UUID uuid," +
+		" Str varchar, Int bigint, Bool boolean, SeqID varchar, UUID timeuuid," +
 		" PRIMARY KEY (Double, Time, Blob)) WITH comment='8'"); !ok {
 		t.Error(msg)
 	}

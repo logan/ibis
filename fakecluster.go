@@ -32,6 +32,13 @@ func (ks *fakeKeyspace) GetCF(name string) (*fakeTable, error) {
 	return cf, nil
 }
 
+func (ks *fakeKeyspace) AddCF(name string, table *fakeTable) {
+	if ks.CFs == nil {
+		ks.CFs = make(map[string]*fakeTable)
+	}
+    ks.CFs[name] = table
+}
+
 type fakeCluster struct {
 	Keyspaces       map[string]*fakeKeyspace
 	CurrentKeyspace string
@@ -459,6 +466,9 @@ func unmarshal(mval *MarshalledValue) (interface{}, error) {
 	case TITimestamp:
 		var t time.Time
 		addr = &t
+    case TIUUID:
+        var u gocql.UUID
+        addr = &u
 	default:
 		return nil, errors.New(fmt.Sprintf("don't know how to unmarshal %+v", mval))
 	}
@@ -485,6 +495,8 @@ func LiteralValue(val interface{}) *MarshalledValue {
 		ti = TIVarchar
 	case time.Time:
 		ti = TITimestamp
+    case TimeUUID, gocql.UUID:
+        ti = TIUUID
 	}
 	if ti == nil {
 		return nil

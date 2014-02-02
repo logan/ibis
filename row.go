@@ -8,19 +8,66 @@ import "time"
 
 import "tux21b.org/v1/gocql"
 
+type TimeUUID gocql.UUID
+
+func UUIDFromTime(t time.Time) TimeUUID {
+    return TimeUUID(gocql.UUIDFromTime(t))
+}
+
+func (id TimeUUID) IsSet() bool {
+    var zero gocql.UUID
+    return !bytes.Equal(gocql.UUID(id).Bytes(), zero.Bytes())
+}
+
+func (id *TimeUUID) Unset() {
+    var zero TimeUUID
+    *id = zero
+}
+
+func (id TimeUUID) MarshalCQL(info *gocql.TypeInfo) ([]byte, error) {
+    switch info.Type {
+    case gocql.TypeBlob, gocql.TypeUUID, gocql.TypeTimeUUID:
+        if !id.IsSet() {
+            return []byte{}, nil
+        }
+        return gocql.UUID(id).Bytes(), nil
+    default:
+        return nil, errors.New(fmt.Sprintf("ibis can't marshal %T into %s", id, info))
+    }
+}
+
+func (id *TimeUUID) UnmarshalCQL(info *gocql.TypeInfo, data []byte) error {
+    switch info.Type {
+    case gocql.TypeBlob, gocql.TypeUUID, gocql.TypeTimeUUID:
+        if len(data) == 0 {
+            id.Unset()
+            return nil
+        }
+        uuid, err := gocql.UUIDFromBytes(data)
+        if err != nil {
+            return err
+        }
+        *id = TimeUUID(uuid)
+        return nil
+    default:
+        return errors.New(fmt.Sprintf("ibis can't unmarshal %T from %s", *id, info))
+    }
+}
+
 var (
 	ErrInvalidRowType = errors.New("row doesn't match schema")
 )
 
 var columnTypeMap = map[string]string{
-	"[]byte":                      "blob",
-	"bool":                        "boolean",
-	"float64":                     "double",
-	"github.com/logan/ibis.SeqID": "varchar",
-	"tux21b.org/v1/gocql.UUID":    "uuid",
-	"int64":                       "bigint",
-	"string":                      "varchar",
-	"time.Time":                   "timestamp",
+	"[]byte":                         "blob",
+	"bool":                           "boolean",
+	"float64":                        "double",
+	"github.com/logan/ibis.SeqID":    "varchar",
+    "github.com/logan/ibis.TimeUUID": "timeuuid",
+	"tux21b.org/v1/gocql.UUID":       "timeuuid",
+	"int64":                          "bigint",
+	"string":                         "varchar",
+	"time.Time":                      "timestamp",
 }
 
 var (
@@ -31,7 +78,7 @@ var (
 	TIBigInt    = &gocql.TypeInfo{Type: gocql.TypeBigInt}
 	TIVarchar   = &gocql.TypeInfo{Type: gocql.TypeVarchar}
 	TITimestamp = &gocql.TypeInfo{Type: gocql.TypeTimestamp}
-	TIUUID      = &gocql.TypeInfo{Type: gocql.TypeUUID}
+	TIUUID      = &gocql.TypeInfo{Type: gocql.TypeTimeUUID}
 )
 
 var typeInfoMap = map[string]*gocql.TypeInfo{
@@ -41,7 +88,7 @@ var typeInfoMap = map[string]*gocql.TypeInfo{
 	"bigint":    TIBigInt,
 	"varchar":   TIVarchar,
 	"timestamp": TITimestamp,
-	"uuid":      TIUUID,
+	"timeuuid":  TIUUID,
 }
 
 var column_validators = map[string]string{
@@ -51,7 +98,7 @@ var column_validators = map[string]string{
 	"org.apache.cassandra.db.marshal.LongType":      "bigint",
 	"org.apache.cassandra.db.marshal.TimestampType": "timestamp",
 	"org.apache.cassandra.db.marshal.UTF8Type":      "varchar",
-	"org.apache.cassandra.db.marshal.UUIDType":      "uuid",
+	"org.apache.cassandra.db.marshal.TimeUUIDType":  "timeuuid",
 }
 
 // MarshalledValue contains the bytes and type info for a value that has already been marshalled for
@@ -206,6 +253,16 @@ func (v *MarshalledValue) cmp(w *MarshalledValue) (int, error) {
 	case time.Time:
 		t1 := x.(time.Time)
 		t2 := y.(time.Time)
+		if t1.Equal(t2) {
+			return 0, nil
+		}
+		if t1.Before(t2) {
+			return -1, nil
+		}
+		return 1, nil
+	case gocql.UUID:
+		t1 := x.(gocql.UUID).Time()
+		t2 := y.(gocql.UUID).Time()
 		if t1.Equal(t2) {
 			return 0, nil
 		}
