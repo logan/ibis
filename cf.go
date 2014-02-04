@@ -13,7 +13,7 @@ var (
 	ErrTableNotBound   = errors.New("table not connected to a cluster")
 	ErrInvalidType     = errors.New("invalid row type")
 	ErrNothingToCommit = errors.New("nothing to commit")
-    ErrInvalidKey      = errors.New("invalid key")
+	ErrInvalidKey      = errors.New("invalid key")
 )
 
 // A type of function that produces CQL statements to execute before committing data.
@@ -256,9 +256,9 @@ func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 	if !cf.IsBound() {
 		return ErrTableNotBound
 	}
-    if len(key) != len(cf.primaryKey) {
-        return ErrInvalidKey
-    }
+	if len(key) != len(cf.primaryKey) {
+		return ErrInvalidKey
+	}
 
 	colnames := make([]string, len(cf.columns))
 	for i, col := range cf.columns {

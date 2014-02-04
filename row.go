@@ -11,51 +11,51 @@ import "tux21b.org/v1/gocql"
 type TimeUUID gocql.UUID
 
 func UUIDFromTime(t time.Time) TimeUUID {
-    return TimeUUID(gocql.UUIDFromTime(t))
+	return TimeUUID(gocql.UUIDFromTime(t))
 }
 
 func (id TimeUUID) String() string {
-    return gocql.UUID(id).String()
+	return gocql.UUID(id).String()
 }
 
 func (id TimeUUID) IsSet() bool {
-    var zero gocql.UUID
-    return !bytes.Equal(gocql.UUID(id).Bytes(), zero.Bytes())
+	var zero gocql.UUID
+	return !bytes.Equal(gocql.UUID(id).Bytes(), zero.Bytes())
 }
 
 func (id *TimeUUID) Unset() {
-    var zero TimeUUID
-    *id = zero
+	var zero TimeUUID
+	*id = zero
 }
 
 func (id TimeUUID) MarshalCQL(info *gocql.TypeInfo) ([]byte, error) {
-    switch info.Type {
-    case gocql.TypeBlob, gocql.TypeUUID, gocql.TypeTimeUUID:
-        if !id.IsSet() {
-            return []byte{}, nil
-        }
-        return gocql.UUID(id).Bytes(), nil
-    default:
-        return nil, errors.New(fmt.Sprintf("ibis can't marshal %T into %s", id, info))
-    }
+	switch info.Type {
+	case gocql.TypeBlob, gocql.TypeUUID, gocql.TypeTimeUUID:
+		if !id.IsSet() {
+			return []byte{}, nil
+		}
+		return gocql.UUID(id).Bytes(), nil
+	default:
+		return nil, errors.New(fmt.Sprintf("ibis can't marshal %T into %s", id, info))
+	}
 }
 
 func (id *TimeUUID) UnmarshalCQL(info *gocql.TypeInfo, data []byte) error {
-    switch info.Type {
-    case gocql.TypeBlob, gocql.TypeUUID, gocql.TypeTimeUUID:
-        if len(data) == 0 {
-            id.Unset()
-            return nil
-        }
-        uuid, err := gocql.UUIDFromBytes(data)
-        if err != nil {
-            return err
-        }
-        *id = TimeUUID(uuid)
-        return nil
-    default:
-        return errors.New(fmt.Sprintf("ibis can't unmarshal %T from %s", *id, info))
-    }
+	switch info.Type {
+	case gocql.TypeBlob, gocql.TypeUUID, gocql.TypeTimeUUID:
+		if len(data) == 0 {
+			id.Unset()
+			return nil
+		}
+		uuid, err := gocql.UUIDFromBytes(data)
+		if err != nil {
+			return err
+		}
+		*id = TimeUUID(uuid)
+		return nil
+	default:
+		return errors.New(fmt.Sprintf("ibis can't unmarshal %T from %s", *id, info))
+	}
 }
 
 var (
@@ -67,7 +67,7 @@ var columnTypeMap = map[string]string{
 	"bool":                           "boolean",
 	"float64":                        "double",
 	"github.com/logan/ibis.SeqID":    "varchar",
-    "github.com/logan/ibis.TimeUUID": "timeuuid",
+	"github.com/logan/ibis.TimeUUID": "timeuuid",
 	"tux21b.org/v1/gocql.UUID":       "timeuuid",
 	"int64":                          "bigint",
 	"string":                         "varchar",

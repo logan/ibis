@@ -46,7 +46,7 @@ func (cmd *createTableCommand) Execute(ks *fakeKeyspace, vals valueList) (result
 		Options:     cmd.options,
 		Rows:        make([]MarshalledMap, 0),
 	}
-    ks.AddCF(cmd.identifier, table)
+	ks.AddCF(cmd.identifier, table)
 	return resultSet{}, nil
 }
 

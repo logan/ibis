@@ -87,7 +87,7 @@ func (tc *testConn) Close() {
 }
 
 func ReflectTestSchema(t *testing.T, model interface{}) *Schema {
-    schema := ReflectSchema(model)
+	schema := ReflectSchema(model)
 	schema.Cluster = NewTestConn(t)
 
 	var err error
@@ -98,5 +98,5 @@ func ReflectTestSchema(t *testing.T, model interface{}) *Schema {
 		t.Fatal(err)
 	}
 
-    return schema
+	return schema
 }
