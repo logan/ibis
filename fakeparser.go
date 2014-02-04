@@ -148,6 +148,8 @@ func pStatement(t pToken) pToken {
 		t = pAlter(u)
 	case "create":
 		t = pCreate(u)
+	case "delete":
+		t = pDelete(u)
 	case "drop":
 		t = pDrop(u)
 	case "insert":
@@ -481,6 +483,29 @@ func pUpdate(t pToken) pToken {
 		a := ctx.(*ctxKeyValue)
 		cmd.set[a.id] = a.val
 	}
+	if t = gRequire(pTerm, termKeyword("where"))(t); t.err != nil {
+		return t
+	}
+	if t = gList(pAssignOrEquals, pTermAnd)(t); t.err != nil {
+		return t
+	}
+	cmd.key = make(map[string]pval)
+	for _, ctx := range t.ctx.([]interface{}) {
+		w := ctx.(*ctxKeyValue)
+		cmd.key[w.id] = w.val
+	}
+	return t.with(&cmd)
+}
+
+func pDelete(t pToken) pToken {
+	var cmd deleteCommand
+	if t = gRequire(pTerm, termKeyword("from"))(t); t.err != nil {
+		return t
+	}
+	if t = pTermId(t); t.err != nil {
+		return t
+	}
+	cmd.table = string(t.ctx.(termId))
 	if t = gRequire(pTerm, termKeyword("where"))(t); t.err != nil {
 		return t
 	}

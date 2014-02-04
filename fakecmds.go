@@ -196,3 +196,35 @@ func (cmd *alterCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, e
 	}
 	return resultSet{}, nil
 }
+
+type deleteCommand struct {
+	table string
+	key   map[string]pval
+}
+
+func (cmd *deleteCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
+	cf, err := ks.GetCF(cmd.table)
+	if err != nil {
+		return nil, err
+	}
+	cmps := make([]comparison, len(cmd.key))
+	for k, v := range cmd.key {
+		cmps = append(cmps, comparison{k, "=", v})
+	}
+loop:
+	for i, row := range cf.Rows {
+		for _, cmp := range cmps {
+			if b, err := cmp.match(row, vals); err != nil || !b {
+				continue loop
+			}
+		}
+		// found match
+		cf.Rows = append(cf.Rows[:i], cf.Rows[i+1:]...)
+		result := selectedRow{row, make([]string, 0)}
+		for k, _ := range row {
+			result.Columns = append(result.Columns, k)
+		}
+		return resultSet{result}, nil
+	}
+	return resultSet{}, nil
+}

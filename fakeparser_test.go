@@ -297,6 +297,31 @@ func TestParseUpdate(t *testing.T) {
 	}
 }
 
+func TestParseDelete(t *testing.T) {
+	var cmd deleteCommand
+	parse := func(s string) error { return parseInto(s, &cmd) }
+
+	if err := parse("DELETE FROM t WHERE x = 1"); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.table != "t" {
+		t.Errorf("wrong table: %+v", cmd)
+	}
+	if len(cmd.key) != 1 || cmd.key["x"].Value == nil {
+		t.Errorf("wrong key: %+v", cmd)
+	}
+
+	if err := parse("DELETE FROM t WHERE x = 1 AND y = 2"); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.table != "t" {
+		t.Errorf("wrong table: %+v", cmd)
+	}
+	if len(cmd.key) != 2 || cmd.key["x"].Value == nil || cmd.key["y"].Value == nil {
+		t.Errorf("wrong key: %+v", cmd)
+	}
+}
+
 func TestParseSelect(t *testing.T) {
 	var cmd selectCommand
 	parse := func(s string) error { return parseInto(s, &cmd) }
