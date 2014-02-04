@@ -58,7 +58,7 @@ func (t token) failf(format string, values ...interface{}) token {
 
 func (t token) advance(n int) token {
 	u := t
-    u.runes = u.runes[n:]
+	u.runes = u.runes[n:]
 	u.pos += n
 	return u
 }
@@ -87,41 +87,42 @@ func pTag(t token) token {
 		def.by[i] = ctx.(string)
 	}
 
-    return pRune(u, ')').with(def)
+	return pRune(u, ')').with(def)
 }
 
 func pIdent(t token) token {
-    var start int
-    for start = 0; start < len(t.runes) && unicode.IsSpace(t.runes[start]); start++ { }
-    var stop int
+	var start int
+	for start = 0; start < len(t.runes) && unicode.IsSpace(t.runes[start]); start++ {
+	}
+	var stop int
 	for stop = start; stop < len(t.runes); stop++ {
 		c := t.runes[stop]
 		if c != '_' && !unicode.IsLetter(c) && !unicode.IsDigit(c) {
 			break
 		}
 	}
-    if start == stop {
-        return t.fail("expected identifier")
-    }
+	if start == stop {
+		return t.fail("expected identifier")
+	}
 	return t.advance(stop).with(string(t.runes[start:stop]))
 }
 
 func pComma(t token) token {
-    return pRune(t, ',')
+	return pRune(t, ',')
 }
 
 func pRune(t token, c rune) token {
-    for len(t.runes) > 0 && unicode.IsSpace(t.runes[0]) {
-        t.runes = t.runes[1:]
-    }
-    if len(t.runes) == 0 {
-        t.eof = true
-        return t.failf("tag terminated early, expected %c", c)
-    }
-    if t.runes[0] != c {
-        return t.failf("expected '%c', got '%c'", c, t.runes[0])
-    }
-    return t.advance(1).with(c)
+	for len(t.runes) > 0 && unicode.IsSpace(t.runes[0]) {
+		t.runes = t.runes[1:]
+	}
+	if len(t.runes) == 0 {
+		t.eof = true
+		return t.failf("tag terminated early, expected %c", c)
+	}
+	if t.runes[0] != c {
+		return t.failf("expected '%c', got '%c'", c, t.runes[0])
+	}
+	return t.advance(1).with(c)
 }
 
 func pEof(t token) token {

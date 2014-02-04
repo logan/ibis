@@ -44,14 +44,14 @@ func (t *IndexTable) NewCF() *ibis.CF {
 }
 
 func (t *IndexTable) Index(keys ...string) *Index {
-    var name string
-    if len(keys) > 0 {
-        if len(keys) > 1 {
-            name = keys[0] + ":" + strings.Join(keys[1:], "")
-        } else {
-            name = keys[0]
-        }
-    }
+	var name string
+	if len(keys) > 0 {
+		if len(keys) > 1 {
+			name = keys[0] + ":" + strings.Join(keys[1:], "")
+		} else {
+			name = keys[0]
+		}
+	}
 	return &Index{Table: t, Name: name}
 }
 
@@ -201,7 +201,7 @@ func (plugin *TimelinePlugin) NewCF() *ibis.CF {
 	plugin.IndexTable = new(IndexTable)
 	cf := plugin.IndexTable.NewCF()
 	cf.Provide(ibis.Plugin(plugin))
-    cf.Provide(IndexProvider(plugin))
+	cf.Provide(IndexProvider(plugin))
 	return cf
 }
 
@@ -260,23 +260,23 @@ func (hook *timelinePrecommitter) precommit(row interface{}, mmap ibis.Marshalle
 }
 
 func (hook *timelinePrecommitter) onUUIDChange(row interface{}, mmap ibis.MarshalledMap,
-        oldU, newU ibis.TimeUUID, defs []timelineDef) ([]ibis.CQL, error) {
+	oldU, newU ibis.TimeUUID, defs []timelineDef) ([]ibis.CQL, error) {
 	cqls := make([]ibis.CQL, 0)
-    if newU.IsSet() {
+	if newU.IsSet() {
 		for _, def := range defs {
-            keys := []string{def.name}
-            if def.by != nil {
-                for _, k := range def.by {
-                    var key string
-                    mv := mmap[k]
-                    if mv != nil && mv.TypeInfo == ibis.TIVarchar {
-                        if err := gocql.Unmarshal(ibis.TIVarchar, mv.Bytes, &key); err != nil {
-                            return nil, err
-                        }
-                    }
-                    keys = append(keys, key)
-                }
-            }
+			keys := []string{def.name}
+			if def.by != nil {
+				for _, k := range def.by {
+					var key string
+					mv := mmap[k]
+					if mv != nil && mv.TypeInfo == ibis.TIVarchar {
+						if err := gocql.Unmarshal(ibis.TIVarchar, mv.Bytes, &key); err != nil {
+							return nil, err
+						}
+					}
+					keys = append(keys, key)
+				}
+			}
 			idx := hook.IndexTable.Index(keys...)
 			cql, err := idx.MakeAdd(newU, row)
 			if err != nil {

@@ -128,36 +128,36 @@ func TestPlugin(t *testing.T) {
 	}
 
 	model := &Model{Rows: ibis.ReflectCF(Row{})}
-    //schema := ibis.ReflectTestSchema(t, model)
-    //defer schema.Cluster.Close()
-    ibis.ReflectTestSchema(t, model)
+	//schema := ibis.ReflectTestSchema(t, model)
+	//defer schema.Cluster.Close()
+	ibis.ReflectTestSchema(t, model)
 
-    uuid1 := ibis.UUIDFromTime(time.Now())
-    row := &Row{Name: "test", Created: uuid1}
-    if err := model.Rows.CommitCAS(row); err != nil {
-        t.Fatal(err)
-    }
+	uuid1 := ibis.UUIDFromTime(time.Now())
+	row := &Row{Name: "test", Created: uuid1}
+	if err := model.Rows.CommitCAS(row); err != nil {
+		t.Fatal(err)
+	}
 
-    var entry Entry
-    if err := model.Indexes.CF.LoadByKey(&entry, "AllRows", uuid1); err != nil {
-        t.Fatal(err)
-    }
-    if uuid1 != entry.ID {
-        t.Errorf("expected %s, got %s", uuid1, entry.ID)
-    }
-    var indexedRow Row
-    if err := entry.Decode(&indexedRow); err != nil {
-        t.Fatal(err)
-    }
-    if row.Name != indexedRow.Name {
-        t.Errorf("expected %v, got %v", row, indexedRow)
-    }
+	var entry Entry
+	if err := model.Indexes.CF.LoadByKey(&entry, "AllRows", uuid1); err != nil {
+		t.Fatal(err)
+	}
+	if uuid1 != entry.ID {
+		t.Errorf("expected %s, got %s", uuid1, entry.ID)
+	}
+	var indexedRow Row
+	if err := entry.Decode(&indexedRow); err != nil {
+		t.Fatal(err)
+	}
+	if row.Name != indexedRow.Name {
+		t.Errorf("expected %v, got %v", row, indexedRow)
+	}
 
-    entry = Entry{}
-    if err := model.Indexes.CF.LoadByKey(&entry, "RowsBy:test", uuid1); err != nil {
-        t.Fatal(err)
-    }
-    if uuid1 != entry.ID {
-        t.Errorf("expected %s, got %s", uuid1, entry.ID)
-    }
+	entry = Entry{}
+	if err := model.Indexes.CF.LoadByKey(&entry, "RowsBy:test", uuid1); err != nil {
+		t.Fatal(err)
+	}
+	if uuid1 != entry.ID {
+		t.Errorf("expected %s, got %s", uuid1, entry.ID)
+	}
 }
