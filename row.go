@@ -58,10 +58,6 @@ func (id *TimeUUID) UnmarshalCQL(info *gocql.TypeInfo, data []byte) error {
 	}
 }
 
-var (
-	ErrInvalidRowType = errors.New("row doesn't match schema")
-)
-
 var columnTypeMap = map[string]string{
 	"[]byte":                         "blob",
 	"bool":                           "boolean",
@@ -314,9 +310,13 @@ func newRowReflector(cf *CF, template interface{}) *rowReflector {
 }
 
 func (s *rowReflector) reflectedRow(x interface{}) (Row, error) {
+	xType := reflect.TypeOf(x)
+	if xType == nil {
+		return nil, ErrInvalidRowType
+	}
 	xValue := reflect.ValueOf(x)
-	if !xValue.Type().ConvertibleTo(s.rowType) {
-		return nil, ErrInvalidType
+	if !xType.ConvertibleTo(s.rowType) {
+		return nil, ErrInvalidRowType
 	}
 	return &reflectedRow{cf: s.cf, value: xValue.Convert(s.rowType).Elem()}, nil
 }

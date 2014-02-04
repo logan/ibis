@@ -8,218 +8,284 @@ import "time"
 
 import "tux21b.org/v1/gocql"
 
-func TestFillFromRowTypeAndKeyAndCreateStatement(t *testing.T) {
+import . "github.com/smartystreets/goconvey/convey"
+
+func TestReflectAndCreate(t *testing.T) {
 	type table struct {
 		Str    string
 		Int    int64
 		Bool   bool
 		Double float64
-		Time   time.Time
-		Blob   []byte
-		SeqID  SeqID
-		UUID   gocql.UUID
+		Nested struct {
+			Time  time.Time
+			Blob  []byte
+			SeqID SeqID
+			UUID  gocql.UUID
+		}
 	}
 
 	cf := &CF{name: "test"}
 	cf.fillFromRowType(reflect.TypeOf(table{}))
 	cf.SetPrimaryKey("Str")
 
-	expect := func(expected string) (string, bool) {
-		received := cf.CreateStatement().String()
-		if expected != received {
-			return fmt.Sprintf("\nexpected: %s\nreceived: %s", expected, received), false
+	shouldBeColumn := func(actual interface{}, expected ...interface{}) string {
+		idx := actual.(int)
+		name := expected[0].(string)
+		cqlType := expected[1].(string)
+
+		if cf.columns[idx].Name != name {
+			return fmt.Sprintf("expected column named %#v, found %#v instead", name,
+				cf.columns[idx].Name)
 		}
-		return "", true
+		if cf.columns[idx].Type != cqlType {
+			return fmt.Sprintf("expected column of type %#v, found %#v instead", cqlType,
+				cf.columns[idx].Type)
+		}
+		return ""
 	}
 
-	if msg, ok := expect("CREATE TABLE test (Str varchar, Int bigint, Bool boolean," +
-		" Double double, Time timestamp, Blob blob, SeqID varchar, UUID timeuuid," +
-		" PRIMARY KEY (Str))"); !ok {
-		t.Error(msg)
-	}
+	Convey("Passing a non-struct type to fillFromRowType should panic", t, func() {
+		So(func() { cf.fillFromRowType(reflect.TypeOf(8)) }, ShouldPanicWith, "row must be struct")
+	})
 
-	cf.SetPrimaryKey("Double", "Time", "Blob")
-	cf.typeID = 8
+	Convey("Checking reflected schema", t, func() {
+		So(0, shouldBeColumn, "Str", "varchar")
+		So(1, shouldBeColumn, "Int", "bigint")
+		So(2, shouldBeColumn, "Bool", "boolean")
+		So(3, shouldBeColumn, "Double", "double")
+		So(4, shouldBeColumn, "Time", "timestamp")
+		So(5, shouldBeColumn, "Blob", "blob")
+		So(6, shouldBeColumn, "SeqID", "varchar")
+		So(7, shouldBeColumn, "UUID", "timeuuid")
+	})
 
-	if msg, ok := expect("CREATE TABLE test (Double double, Time timestamp, Blob blob," +
-		" Str varchar, Int bigint, Bool boolean, SeqID varchar, UUID timeuuid," +
-		" PRIMARY KEY (Double, Time, Blob)) WITH comment='8'"); !ok {
-		t.Error(msg)
-	}
-}
+	Convey("Checking create statement", t, func() {
+		So(cf.CreateStatement().String(), ShouldEqual,
+			"CREATE TABLE test (Str varchar, Int bigint, Bool boolean,"+
+				" Double double, Time timestamp, Blob blob, SeqID varchar, UUID timeuuid,"+
+				" PRIMARY KEY (Str))")
 
-type crudRow struct {
-	Partition string `ibis:"key"`
-	Cluster   int64  `ibis:"key"`
-	Value     string
-}
-
-type crudTable struct {
-	*CF
-}
-
-func (t *crudTable) NewCF() *CF {
-	t.CF = ReflectCF(crudRow{})
-	return t.cf
-}
-
-func (t *crudTable) crud() *crudTable { return t }
-
-type crudIndexRow struct {
-	Partition string `ibis:"key"`
-	// TODO: test a counter here
-}
-
-type crudIndexTable struct {
-	*CF
-}
-
-func (t *crudIndexTable) NewCF() *CF {
-	t.CF = ReflectCF(crudIndexRow{})
-	return t.CF
-}
-
-type crudModel struct {
-	*crudTable
-	*crudIndexTable
-	*Schema
-}
-
-func newCrudModel(t *testing.T) *crudModel {
-	cluster := NewTestConn(t)
-	model := &crudModel{}
-	model.Schema = ReflectSchema(model)
-	model.Schema.Cluster = cluster
-
-	var err error
-	if model.Schema.SchemaUpdates, err = DiffLiveSchema(cluster, model.Schema); err != nil {
-		t.Fatal(err)
-	}
-	if err = model.Schema.ApplySchemaUpdates(); err != nil {
-		t.Fatal(err)
-	}
-	return model
+		cf.SetPrimaryKey("Double", "Time", "Blob")
+		cf.typeID = 8
+		So(cf.CreateStatement().String(), ShouldEqual,
+			"CREATE TABLE test (Double double, Time timestamp, Blob blob,"+
+				" Str varchar, Int bigint, Bool boolean, SeqID varchar, UUID timeuuid,"+
+				" PRIMARY KEY (Double, Time, Blob)) WITH comment='8'")
+	})
 }
 
 func TestCrud(t *testing.T) {
-	model := newCrudModel(t)
-	defer model.Close()
+	type crudRow struct {
+		Partition string `ibis:"key"`
+		Cluster   int64  `ibis:"key"`
+		Value     string
+	}
+	model := &struct{ Test *CF }{ReflectCF(crudRow{})}
+	schema := ReflectTestSchema(t, model)
+	defer schema.Cluster.Close()
 
-	crud := crudRow{Partition: "P1", Cluster: 0, Value: "P1-0"}
-	if err := model.crudTable.CommitCAS(&crud); err != nil {
-		t.Fatal(err)
-	}
-	err := model.crudTable.CommitCAS(&crud)
-	if err != ErrAlreadyExists {
-		t.Fatalf("expected ErrAlreadyExists, got %v", err)
-	}
+	cf := model.Test
 
-	crud = crudRow{}
-	if err = model.crudTable.LoadByKey(&crud, "P1", 0); err != nil {
-		t.Fatal(err)
-	}
-	if crud.Partition != "P1" || crud.Cluster != 0 || crud.Value != "P1-0" {
-		t.Error("LoadByKey didn't fill in what we expected: %+v", crud)
-	}
-	if err = model.crudTable.LoadByKey(&crud, "P1", 1); err == nil {
-		t.Fatalf("expected ErrNotFound, got %v", err)
-	}
+	Convey("CommitCAS should work exactly once for a given key (\"P1\", 0)", t, func() {
+		crud := crudRow{Partition: "P1", Cluster: 0, Value: "P1-0"}
+		So(cf.CommitCAS(&crud), ShouldBeNil)
+		So(cf.CommitCAS(&crud), ShouldEqual, ErrAlreadyExists)
+	})
 
-	crud.Cluster = 1
-	crud.Value = "P1-1"
-	if err := model.crudTable.CommitCAS(&crud); err != nil {
-		t.Fatal(err)
-	}
-	loaded := crudRow{}
-	if err = model.crudTable.LoadByKey(&loaded, "P1", 1); err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Value != "P1-1" {
-		t.Errorf("expected loaded to have value of P1-1, got: %+v", loaded)
-	}
+	Convey("LoadByKey should retrieve (\"P1\", 0)", t, func() {
+		var crud crudRow
+		So(cf.LoadByKey(&crud, "P1", 0), ShouldBeNil)
+		So(crud.Partition, ShouldEqual, "P1")
+		So(crud.Cluster, ShouldEqual, 0)
+		So(crud.Value, ShouldEqual, "P1-0")
+	})
 
-	crud.Value = "P1-1 modified"
-	if err := model.crudTable.Commit(&crud); err != nil {
-		t.Fatal(err)
-	}
-	loaded = crudRow{}
-	if err = model.crudTable.LoadByKey(&loaded, "P1", 1); err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Value != "P1-1 modified" {
-		t.Errorf("expected loaded to have value of P1-1 modified, got: %+v", loaded)
-	}
+	Convey("LoadByKey should return ErrNotFound for (\"P1\", 1)", t, func() {
+		var crud crudRow
+		So(cf.LoadByKey(&crud, "P1", 1), ShouldEqual, ErrNotFound)
+	})
 
-	var b bool
-	if b, err = model.crudTable.Exists("P2", 0); err != nil {
-		t.Fatal(err)
-	}
-	if b {
-		t.Fatal("Exists should have returned false")
-	}
-	if b, err = model.crudTable.Exists("P1", 0); err != nil {
-		t.Fatal(err)
-	}
-	if !b {
-		t.Fatal("Exists should have returned true")
-	}
+	Convey("LoadByKey should retrieve (\"P1\", 1) once it's committed", t, func() {
+		crud := crudRow{Partition: "P1", Cluster: 1, Value: "P1-1"}
+		So(cf.CommitCAS(&crud), ShouldBeNil)
+		var retr crudRow
+		So(cf.LoadByKey(&retr, "P1", 1), ShouldBeNil)
+		So(retr.Partition, ShouldEqual, "P1")
+		So(retr.Cluster, ShouldEqual, 1)
+		So(retr.Value, ShouldEqual, "P1-1")
+	})
+
+	Convey("Commit should update an existing row", t, func() {
+		crud := crudRow{Partition: "P1", Cluster: 1, Value: "P1-1 modified"}
+		So(cf.CommitCAS(&crud), ShouldEqual, ErrAlreadyExists)
+		So(cf.Commit(&crud), ShouldBeNil)
+		var retr crudRow
+		So(cf.LoadByKey(&retr, "P1", 1), ShouldBeNil)
+		So(retr.Partition, ShouldEqual, "P1")
+		So(retr.Cluster, ShouldEqual, 1)
+		So(retr.Value, ShouldEqual, "P1-1 modified")
+	})
+
+	Convey("Checking Exists", t, func() {
+		shouldExist := func(actual interface{}, expected ...interface{}) string {
+			exp := true
+			if len(expected) > 0 {
+				exp = expected[0].(bool)
+			}
+			key := actual.([]interface{})
+			b, err := cf.Exists(key...)
+			if err != nil {
+				return fmt.Sprint(err)
+			}
+			if exp {
+				return ShouldBeTrue(b)
+			} else {
+				return ShouldBeFalse(b)
+			}
+		}
+		shouldNotExist := func(actual interface{}, expected ...interface{}) string {
+			return shouldExist(actual, false)
+		}
+		So([]interface{}{"P1", 0}, shouldExist)
+		So([]interface{}{"P1", 1}, shouldExist)
+		So([]interface{}{"P1", 2}, shouldNotExist)
+		So([]interface{}{"P2", 0}, shouldNotExist)
+	})
 }
 
 func TestProvisioning(t *testing.T) {
-	model := newCrudModel(t)
-	defer model.Close()
+	type row struct {
+		ID string `ibis:"key"`
+	}
+	model := &struct{ Test *CF }{ReflectCF(row{})}
+	schema := ReflectTestSchema(t, model)
+	defer schema.Cluster.Close()
+	cf := model.Test
 
-	type crudProvider interface {
-		crud() *crudTable
-	}
-	model.crudTable.Provide(crudProvider(model.crudTable))
+	Convey("Requesting unprovisioned interface should return nil", t, func() {
+		var c Cluster
+		So(cf.GetProvider(&c), ShouldBeFalse)
+		So(c, ShouldBeNil)
+	})
 
-	var p crudProvider
-	if !model.Schema.GetProvider(&p) {
-		t.Fatal("GetProvider returned false")
-	}
-	if p.crud() != model.crudTable {
-		t.Fatalf("crudProvider returned something unexpected: %v vs. %v", p.crud(), model.crudTable)
-	}
+	Convey("Providing an interface and then requesting it should return it", t, func() {
+		var c Cluster
+		cf.Provide(schema.Cluster)
+		So(cf.GetProvider(&c), ShouldBeTrue)
+		So(c, ShouldEqual, schema.Cluster)
+		var q Query
+		So(cf.GetProvider(&q), ShouldBeFalse)
+	})
+
+	Convey("Passing an invalid pointer to GetProvider should panic", t, func() {
+		So(func() { cf.GetProvider(8) }, ShouldPanicWith,
+			"destination must be a pointer to an interface")
+		So(func() { cf.GetProvider(cf) }, ShouldPanicWith,
+			"destination must be a pointer to an interface")
+	})
 }
 
 func TestPrecommitHooks(t *testing.T) {
-	model := newCrudModel(t)
-	defer model.Close()
+	type rowType struct {
+		ID string `ibis:"key"`
+	}
+	model := &struct {
+		Src  *CF
+		Dest *CF
+	}{ReflectCF(rowType{}), ReflectCF(rowType{})}
+	schema := ReflectTestSchema(t, model)
+	defer schema.Cluster.Close()
 
-	partErr := errors.New("partErr")
-	hook := func(row interface{}, mmap MarshalledMap) ([]CQL, error) {
-		crud := row.(*crudRow)
-		if err := model.crudTable.unmarshal(crud, mmap); err != nil {
-			return nil, err
+	src := model.Src
+	dest := model.Dest
+	failErr := errors.New("failErr")
+
+	src.Precommit(func(row interface{}, mmap MarshalledMap) ([]CQL, error) {
+		id := row.(*rowType).ID
+		if id == "fail" {
+			return nil, failErr
 		}
-		if crud.Partition == "" {
-			return nil, partErr
-		}
-		entry := &crudIndexRow{Partition: crud.Partition}
-		cql, err := model.crudIndexTable.MakeCommit(entry)
+		cql, err := dest.MakeCommit(&rowType{id + "-mirror"})
 		if err != nil {
 			return nil, err
 		}
 		return []CQL{cql}, nil
-	}
-	model.crudTable.Precommit(hook)
+	})
 
-	crud := crudRow{Partition: "P1", Cluster: 0, Value: "P1-0"}
-	if err := model.crudTable.CommitCAS(&crud); err != nil {
-		t.Fatal(err)
-	}
+	Convey("Precommit hook should be able to piggyback commits to another table", t, func() {
+		So(src.CommitCAS(&rowType{"test"}), ShouldBeNil)
+		b, err := dest.Exists("test-mirror")
+		So(err, ShouldBeNil)
+		So(b, ShouldBeTrue)
+	})
 
-	entry := &crudIndexRow{}
-	if err := model.crudIndexTable.LoadByKey(entry, "P1"); err != nil {
-		t.Fatal(err)
-	}
-	if entry.Partition != "P1" {
-		t.Errorf("expected entry with partition P1, got: %+v", entry.Partition)
-	}
+	Convey("Precommit error should interrupt commit and percolate back to caller", t, func() {
+		So(src.Commit(&rowType{"fail"}), ShouldEqual, failErr)
+	})
+}
 
-	crud = crudRow{}
-	if err := model.crudTable.Commit(&crud); err != partErr {
-		t.Error("expected partErr, got", err)
+func TestMiscCFErrors(t *testing.T) {
+	type r struct {
+		ID string `ibis:"key"`
 	}
+	cf := ReflectCF(r{})
+	unboundCf := ReflectCF(r{})
+	model := &struct{ T *CF }{cf}
+	schema := ReflectTestSchema(t, model)
+	defer schema.Cluster.Close()
+
+	Convey("Operations on unbound CF should return false, ErrTableNotBound", t, func() {
+		_, err := unboundCf.Exists()
+		So(err, ShouldEqual, ErrTableNotBound)
+		So(unboundCf.Commit(nil), ShouldEqual, ErrTableNotBound)
+		So(unboundCf.CommitCAS(nil), ShouldEqual, ErrTableNotBound)
+	})
+
+	Convey("LoadByKey errors", t, func() {
+		Convey("on unbound CF should return ErrTableNotBound", func() {
+			So(unboundCf.LoadByKey(nil), ShouldEqual, ErrTableNotBound)
+		})
+		Convey("on mismatched key length should return ErrInvalidKey", func() {
+			So(cf.LoadByKey(nil), ShouldEqual, ErrInvalidKey)
+		})
+		Convey("on invalid dest should return ErrInvalidRowType", func() {
+			So(cf.Commit(&r{"test"}), ShouldBeNil)
+			So(cf.LoadByKey(nil, "test"), ShouldEqual, ErrInvalidRowType)
+		})
+	})
+
+}
+
+func TestCFQuery(t *testing.T) {
+	type rowType struct {
+		Partition string `ibis:"key"`
+		Cluster   string `ibis:"key"`
+	}
+	model := &struct{ Test *CF }{ReflectCF(rowType{})}
+	schema := ReflectTestSchema(t, model)
+	defer schema.Cluster.Close()
+	cf := model.Test
+
+	Convey("CFQuery should yield all committed rows", t, func() {
+		rows := []*rowType{
+			&rowType{"P", "l"},
+			&rowType{"P", "o"},
+			&rowType{"P", "g"},
+			&rowType{"P", "a"},
+			&rowType{"P", "n"},
+		}
+		for _, row := range rows {
+			So(cf.CommitCAS(row), ShouldBeNil)
+		}
+		q := Select().From(cf).Where("Partition = ?", "P").OrderBy("Cluster").CQL().Query()
+		cfq := cf.Scanner(q)
+		expected := []string{"a", "g", "l", "n", "o"}
+		clusters := make([]string, 0)
+		var row rowType
+		for i := 0; cfq.ScanRow(&row); i++ {
+			clusters = append(clusters, row.Cluster)
+		}
+		So(clusters, ShouldResemble, expected)
+		So(cfq.Close(), ShouldBeNil)
+	})
 }

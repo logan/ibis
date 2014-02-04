@@ -11,9 +11,9 @@ var (
 	ErrNotFound        = errors.New("not found")
 	ErrAlreadyExists   = errors.New("already exists")
 	ErrTableNotBound   = errors.New("table not connected to a cluster")
-	ErrInvalidType     = errors.New("invalid row type")
 	ErrNothingToCommit = errors.New("nothing to commit")
 	ErrInvalidKey      = errors.New("invalid key")
+	ErrInvalidRowType  = errors.New("row doesn't match schema")
 )
 
 // A type of function that produces CQL statements to execute before committing data.
@@ -25,6 +25,13 @@ type PrecommitHook func(interface{}, MarshalledMap) ([]CQL, error)
 type CFProvider interface {
 	NewCF() *CF
 }
+
+type cfProviderFunc func() *CF
+
+func (p cfProviderFunc) NewCF() *CF { return p() }
+
+// CFProviderFunc wraps a function as a CFProvider.
+func CFProviderFunc(provider func() *CF) CFProvider { return cfProviderFunc(provider) }
 
 // CF describes how rows of a column family (table) are stored in Cassandra. If connected to a
 // live schema, then operations on a column family may be made through methods on this type.
@@ -454,7 +461,7 @@ func (cf *CF) marshal(src interface{}) (MarshalledMap, error) {
 	row, ok := src.(Row)
 	if !ok {
 		if cf.rowReflector == nil {
-			return nil, ErrInvalidType
+			return nil, ErrInvalidRowType
 		}
 		var err error
 		row, err = cf.rowReflector.reflectedRow(src)
@@ -473,7 +480,7 @@ func (cf *CF) unmarshal(dest interface{}, mmap MarshalledMap) error {
 	row, ok := dest.(Row)
 	if !ok {
 		if cf.rowReflector == nil {
-			return ErrInvalidType
+			return ErrInvalidRowType
 		}
 		var err error
 		row, err = cf.rowReflector.reflectedRow(dest)
