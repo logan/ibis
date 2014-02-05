@@ -212,7 +212,7 @@ func (q *fakeQuery) scan(dests []interface{}, cas bool) bool {
 	return applied
 }
 
-type optionMap map[string]string
+type optionMap map[string]pval
 
 type fakeTable struct {
 	Columns     []string

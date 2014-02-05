@@ -97,14 +97,14 @@ func parseWith(text string, grammar _parser) pToken {
 
 func gRequire(p _parser, ctx interface{}) _parser {
 	return func(t pToken) pToken {
-		t = p(t)
-		if t.err != nil {
-			return t
+		u := p(t)
+		if u.err != nil {
+			return u
 		}
-		if t.ctx != ctx {
-			return t.failf("expected %v, got %v", ctx, t.ctx)
+		if u.ctx != ctx {
+			return t.failf("expected %v, got %v", ctx, u.ctx)
 		}
-		return t
+		return u
 	}
 }
 
@@ -168,16 +168,13 @@ func pStatement(t pToken) pToken {
 }
 
 func pCreate(t pToken) pToken {
-	if t.eof() {
-		return t.fail("unexpected end of statement")
-	}
-	t = pTerm(t)
-	kw, _ := t.ctx.(termKeyword)
+	u := pTerm(t)
+	kw, _ := u.ctx.(termKeyword)
 	switch kw {
 	case "keyspace":
-		return pCreateKeyspace(t)
+		return pCreateKeyspace(u)
 	case "table", "columnfamily":
-		return pCreateTable(t)
+		return pCreateTable(u)
 	default:
 		return t.fail("expected KEYSPACE or TABLE")
 	}
@@ -303,10 +300,9 @@ func pWithOptions(t pToken) pToken {
 	}
 	options := make(optionMap)
 	ctxs := t.ctx.([]interface{})
-	// TODO: conver to pvals
 	for _, ctx := range ctxs {
 		opt := ctx.(*ctxOption)
-		options[opt.key] = fmt.Sprintf("%s", opt.val)
+		options[opt.key] = opt.val
 	}
 	return t.with(options)
 }
@@ -332,15 +328,14 @@ func pOption(t pToken) pToken {
 
 func pDrop(t pToken) pToken {
 	var cmd dropCommand
-	if t = pTerm(t); t.err != nil {
-		return t
-	}
-	kw, _ := t.ctx.(termKeyword)
+	u := pTerm(t)
+	kw, _ := u.ctx.(termKeyword)
 	if kw != "keyspace" && kw != "table" {
 		return t.fail("expected KEYSPACE or TABLE")
 	}
 	cmd.dropType = string(kw)
-	if u := pIfExists(t); u.err == nil {
+	t = u
+	if u = pIfExists(t); u.err == nil {
 		t = u
 	} else {
 		cmd.strict = true
@@ -363,9 +358,6 @@ func pAlter(t pToken) pToken {
 	}
 	cmd.table = string(t.ctx.(termId))
 	u := pTerm(t)
-	if u.err != nil {
-		return u
-	}
 	kw, _ := u.ctx.(termKeyword)
 	switch kw {
 	case "with":
@@ -564,11 +556,12 @@ func pSelect(t pToken) pToken {
 
 	if u := gRequire(pTerm, termKeyword("limit"))(t); u.err == nil {
 		t = u
-		t = pTerm(t)
-		limit, ok := t.ctx.(termNumber)
+		u = pTerm(t)
+		limit, ok := u.ctx.(termNumber)
 		if !ok {
-			t.fail("expected number")
+			return t.fail("expected number")
 		}
+		t = u
 		cmd.limit = int(limit)
 	}
 	return t.with(&cmd)
@@ -587,13 +580,15 @@ func pSelectList(t pToken) pToken {
 			if t = gRequire(pTerm, termSymbol("("))(t); t.err != nil {
 				return t
 			}
-			t = pTerm(t)
-			switch v := t.ctx.(type) {
+			u = pTerm(t)
+			switch v := u.ctx.(type) {
 			case termNumber:
+				t = u
 			case termSymbol:
 				if v != "*" {
 					return t.fail("expected * or 1")
 				}
+				t = u
 			default:
 				t.fail("expected * or 1")
 			}
@@ -644,8 +639,8 @@ func pComparison(t pToken) pToken {
 		return t
 	}
 	cmp.col = string(t.ctx.(termId))
-	t = pTerm(t)
-	sym, ok := t.ctx.(termSymbol)
+	u := pTerm(t)
+	sym, ok := u.ctx.(termSymbol)
 	if !ok {
 		return t.fail("expected comparison operator")
 	}
@@ -655,7 +650,7 @@ func pComparison(t pToken) pToken {
 	default:
 		return t.fail("expected comparison operator")
 	}
-	if t = pValue(t); t.err != nil {
+	if t = pValue(u); t.err != nil {
 		return t
 	}
 	cmp.val = t.ctx.(pval)
@@ -709,9 +704,6 @@ func pTermIdList(t pToken) pToken {
 
 func pTermId(t pToken) pToken {
 	u := pTerm(t)
-	if u.err != nil {
-		return u
-	}
 	if _, ok := u.ctx.(termId); ok {
 		return u
 	}
@@ -743,6 +735,9 @@ func pTermAnd(t pToken) pToken {
 }
 
 func pValue(t pToken) pToken {
+	if t.eof() {
+		return t.fail("expected value, got end of statement")
+	}
 	u := pTerm(t)
 	if u.err == nil {
 		switch v := u.ctx.(type) {
@@ -820,20 +815,21 @@ func pTerm(t pToken) pToken {
 	if first == '?' {
 		v := termVar(t.stmt.numVars)
 		t.stmt.numVars++
-		return t.advance(1).with(v)
+		return pSkipSpace(t.advance(1)).with(v)
 	} else if first == '\'' {
-		return pStringLiteral(t)
+		return pSkipSpace(pStringLiteral(t))
 	} else if unicode.IsDigit(first) {
-		return pNumberLiteral(t)
+		return pSkipSpace(pNumberLiteral(t))
 	} else if first == '_' || unicode.IsLetter(first) {
 		r := pSkipAlphanumeric(t)
 		id := strings.ToLower(r.minus(t))
+		s := pSkipSpace(r)
 		if isKeyword(id) {
-			return r.with(termKeyword(id))
+			return s.with(termKeyword(id))
 		}
-		return r.with(termId(id))
+		return s.with(termId(id))
 	} else {
-		return pSymbol(t)
+		return pSkipSpace(pSymbol(t))
 	}
 }
 
@@ -873,7 +869,7 @@ func pNumberLiteral(t pToken) pToken {
 }
 
 func pSkipSpace(t pToken) pToken {
-	for i := 0; i < len(t.runes); i++ {
+	for i := 0; t.err == nil && i < len(t.runes); i++ {
 		if !unicode.IsSpace(t.runes[i]) {
 			return t.advance(i)
 		}
@@ -986,7 +982,7 @@ func pSymbol(t pToken) pToken {
 			return t.advance(2).with(termSymbol(string(t.runes[:2])))
 		}
 		return t.advance(1).with(termSymbol(string(t.runes[:1])))
-	case '=', '{', '}', '(', ')', ':', ',', '*', '\'', '"':
+	case '=', '{', '}', '[', ']', '(', ')', ':', ',', '*', '\'', '"':
 		return t.advance(1).with(termSymbol(string(t.runes[:1])))
 	default:
 		return t.failf("don't know how to handle character '%c' (%#v)", t.runes[0], t.runes[0])

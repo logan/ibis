@@ -5,397 +5,621 @@ import "fmt"
 import "reflect"
 import "testing"
 
-func parseInto(s string, dest interface{}) error {
+import "tux21b.org/v1/gocql"
+
+import . "github.com/smartystreets/goconvey/convey"
+
+func parseInto(s string, dest interface{}) pToken {
 	tok := parseWith(s, pStatement)
 	if tok.err != nil {
-		return tok.err
+		return tok
 	}
 	destval := reflect.ValueOf(dest)
 	if destval.Type().Kind() != reflect.Ptr {
-		return errors.New("parseInto dest requires a pointer")
+		tok.err = errors.New("parseInto dest requires a pointer")
+		return tok
 	}
 	elem := destval.Elem()
 	ctx := reflect.ValueOf(tok.ctx).Elem()
 	if elem.Type() != ctx.Type() {
-		return errors.New(fmt.Sprintf("dest type %s incompatible with ctx type %s",
+		tok.err = errors.New(fmt.Sprintf("dest type %s incompatible with ctx type %s",
 			elem.Type(), ctx.Type()))
+		return tok
 	}
 	elem.Set(ctx)
-	return nil
+	return tok
+}
+
+func shouldFailNear(actual interface{}, expected ...interface{}) string {
+	tok := actual.(pToken)
+	if tok.err == nil {
+		return "parse should have failed but did not"
+	}
+	return ShouldStartWith(string(tok.runes), expected...)
+}
+
+func shouldParse(actual interface{}, expected ...interface{}) string {
+	tok := actual.(pToken)
+	return ShouldBeNil(tok.err)
+}
+
+func TestCompile(t *testing.T) {
+	Convey("Statement should compile", t, func() {
+		s := newStatement("SELECT * FROM t")
+		So(s.Compile(), ShouldBeNil)
+		So(s.cmd, ShouldHaveSameTypeAs, &selectCommand{})
+	})
+
+	Convey("Parse error should point to location", t, func() {
+		s := newStatement("SELECT FROM")
+		err := s.Compile()
+		So(err, ShouldNotBeNil)
+		So(err.Error(), ShouldContainSubstring, "\n       ^")
+	})
+}
+
+func TestPToken(t *testing.T) {
+	Convey("minus should safely return substring", t, func() {
+		t := pToken{runes: []rune("test")}
+		u := t.advance(3)
+		So(u.minus(t), ShouldEqual, "tes")
+		So(t.minus(u), ShouldEqual, "")
+	})
+
+	Convey("advance should never advance past end of runes", t, func() {
+		t := pToken{runes: []rune("test")}
+		u := t.advance(3)
+		So(string(u.runes), ShouldEqual, "t")
+		u = u.advance(3)
+		So(string(u.runes), ShouldEqual, "")
+	})
+}
+
+func TestGeneralParseErrors(t *testing.T) {
+	var cmd insertCommand
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
+
+	Convey("Unrecognized symbols should cause error", t, func() {
+		So(parse("INSERT!"), shouldFailNear, "")
+	})
+
+	Convey("Unrecognized command should cause error", t, func() {
+		So(parse("insret"), shouldFailNear, "insret")
+		So(parse("VARCHAR"), shouldFailNear, "VARCHAR")
+	})
+}
+
+func TestParseValue(t *testing.T) {
+	var cmd insertCommand
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
+
+	Convey("Placeholders should produce incrementing VarIndex", t, func() {
+		So(parse("INSERT INTO t (x, y, z) VALUES (?, ?, ?)"), shouldParse)
+		So(cmd.values, ShouldResemble,
+			[]pval{pval{VarIndex: 0}, pval{VarIndex: 1}, pval{VarIndex: 2}})
+	})
+
+	Convey("Integer literals", t, func() {
+		So(parse("INSERT INTO t (x, y, z) VALUES (1, 123, 8421)"), shouldParse)
+		expected := []pval{
+			pval{Value: LiteralValue(1)},
+			pval{Value: LiteralValue(123)},
+			pval{Value: LiteralValue(8421)},
+		}
+		So(cmd.values, ShouldResemble, expected)
+		So(parse("INSERT INTO t (x) VALUES (999999999999999999999999999999999999999)"),
+			shouldFailNear, "999999999999999999999999999999999999999)")
+	})
+
+	Convey("String literals", t, func() {
+		So(parse("INSERT INTO t (x) VALUES ('abc')"), shouldParse)
+		expected := []pval{pval{Value: LiteralValue("abc")}}
+		So(cmd.values, ShouldResemble, expected)
+
+		So(parse(`INSERT INTO t (x) VALUES ('ab\'c\\de\f')`), shouldParse)
+		expected[0].Value = LiteralValue(`ab'c\def`)
+		So(cmd.values, ShouldResemble, expected)
+
+		So(parse("INSERT INTO t (x) VALUES ('abc"), shouldFailNear, "'abc")
+		So(parse(`INSERT INTO t (x) VALUES ('abc\')`), shouldFailNear, `'abc\'`)
+	})
+
+	Convey("Map and set literals", t, func() {
+		So(parse("INSERT INTO t (x) VALUES ({?, ?, ?})"), shouldParse)
+		expected := []pval{pval{Value: LiteralValue("")}}
+		So(cmd.values, ShouldResemble, expected)
+
+		So(parse("INSERT INTO t (x) VALUES ({?: ?, ?: ?, ?: ?})"), shouldParse)
+		So(cmd.values, ShouldResemble, expected)
+
+		So(parse("INSERT INTO t (x) VALUES ({"), shouldFailNear, "")
+		So(parse("INSERT INTO t (x) VALUES ({?,})"), shouldFailNear, "})")
+		So(parse("INSERT INTO t (x) VALUES ({?,?:?})"), shouldFailNear, ":?")
+		So(parse("INSERT INTO t (x) VALUES ({?,x})"), shouldFailNear, "x})")
+		So(parse("INSERT INTO t (x) VALUES ({?:})"), shouldFailNear, "})")
+		So(parse("INSERT INTO t (x) VALUES ({?:?,})"), shouldFailNear, "})")
+		So(parse("INSERT INTO t (x) VALUES ({?:?,?})"), shouldFailNear, "})")
+	})
+
+	Convey("List literals", t, func() {
+		So(parse("INSERT INTO t (x) VALUES ([?])"), shouldParse)
+		expected := []pval{pval{Value: LiteralValue("")}}
+		So(cmd.values, ShouldResemble, expected)
+
+		So(parse("INSERT INTO t (x) VALUES ([?, ?, ?])"), shouldParse)
+		So(cmd.values, ShouldResemble, expected)
+	})
 }
 
 func TestParseCreateKeyspace(t *testing.T) {
 	var cmd createKeyspaceCommand
-	parse := func(s string) error { return parseInto(s, &cmd) }
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
 
-	if err := parse("CREATE KEYSPACE test"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.identifier != "test" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if !cmd.strict {
-		t.Errorf("strict should be true: %+v", cmd)
-	}
-	if len(cmd.options) != 0 {
-		t.Errorf("options should be empty: %+v", cmd)
-	}
+	Convey("Parse errors should be caught", t, func() {
+		So(parse("CREATE keespace test"), shouldFailNear, "keespace")
+		So(parse("CREATE select test"), shouldFailNear, "select")
+		So(parse("CREATE KEYSPACE"), shouldFailNear, "")
+		So(parse("CREATE KEYSPACE 123"), shouldFailNear, "123")
+		So(parse("CREATE KEYSPACE test garbage"), shouldFailNear, "garbage")
+		So(parse("CREATE KEYSPACE test WITH"), shouldFailNear, "")
+		So(parse("CREATE KEYSPACE test WITH 123"), shouldFailNear, "123")
+		So(parse("CREATE KEYSPACE test WITH x 123"), shouldFailNear, "123")
+		So(parse("CREATE KEYSPACE test WITH x = 123 AND"), shouldFailNear, "")
+		So(parse("CREATE KEYSPACE test WITH x = 123 AND y = 'test' xxx"), shouldFailNear, "xxx")
+	})
 
-	if err := parse("CREATE KEYSPACE IF NOT EXISTS test"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.identifier != "test" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if cmd.strict {
-		t.Errorf("strict should be false: %+v", cmd)
-	}
+	Convey("CREATE KEYSPACE <table> should parse correctly", t, func() {
+		So(parse("CREATE KEYSPACE test"), shouldParse)
+		So(cmd.identifier, ShouldEqual, "test")
+		So(cmd.strict, ShouldBeTrue)
+		So(cmd.options, ShouldBeNil)
+	})
 
-	if err := parse("CREATE KEYSPACE IF NOT EXISTS test WITH x=1"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.identifier != "test" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.options) != 1 || cmd.options["x"] == "" {
-		t.Errorf("invalid options: %+v", cmd)
-	}
+	Convey("CREATE KEYSPACE IF NOT EXISTS <table> should parse correctly", t, func() {
+		So(parse("CREATE KEYSPACE IF NOT EXISTS test"), shouldParse)
+		So(cmd.identifier, ShouldEqual, "test")
+		So(cmd.strict, ShouldBeFalse)
+	})
 
-	if err := parse("CREATE KEYSPACE test WITH x=1 AND y = 'str'"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.identifier != "test" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.options) != 2 || cmd.options["x"] == "" || cmd.options["y"] == "" {
-		t.Errorf("invalid options: %+v", cmd)
-	}
+	Convey("Options should parse correctly", t, func() {
+		So(parse("CREATE KEYSPACE IF NOT EXISTS test WITH x=1"), shouldParse)
+		expected := optionMap{"x": pval{Value: LiteralValue(1)}}
+		So(cmd.options, ShouldResemble, expected)
+
+		So(parse("CREATE KEYSPACE test WITH x=1 AND y = 'str'"), shouldParse)
+		expected["y"] = pval{Value: LiteralValue("str")}
+		So(cmd.options, ShouldResemble, expected)
+	})
 }
 
 func TestParseCreateTable(t *testing.T) {
 	var cmd createTableCommand
-	parse := func(s string) error { return parseInto(s, &cmd) }
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
 
-	if err := parse("CREATE TABLE t (x varchar)"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.identifier != "t" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.colnames) != 1 || cmd.colnames[0] != "x" {
-		t.Errorf("wrong cols: %+v", cmd)
-	}
-	if len(cmd.coltypes) != 1 || cmd.coltypes[0] != TIVarchar {
-		t.Errorf("wrong coltypes: %+v", cmd)
-	}
-	if !cmd.strict {
-		t.Errorf("strict should be true: %+v", cmd)
-	}
+	Convey("Parse errors should be caught", t, func() {
+		So(parse("CREATE TABLE"), shouldFailNear, "")
+		So(parse("CREATE TABLE table"), shouldFailNear, "table")
+		So(parse("CREATE TABLE IF ("), shouldFailNear, "IF (")
+		So(parse("CREATE TABLE IF EXISTS"), shouldFailNear, "IF EXISTS")
+		So(parse("CREATE TABLE IF NOT EXISTS"), shouldFailNear, "")
+		So(parse("CREATE TABLE test"), shouldFailNear, "")
+		So(parse("CREATE TABLE test x"), shouldFailNear, "x")
+		So(parse("CREATE TABLE test (x"), shouldFailNear, "")
+		So(parse("CREATE TABLE test (x,"), shouldFailNear, ",")
+		So(parse("CREATE TABLE test (x varchar"), shouldFailNear, "")
+		So(parse("CREATE TABLE test (x varchar) garbage"), shouldFailNear, "garbage")
+		So(parse("CREATE TABLE test (x varchar primary,)"), shouldFailNear, ",")
+		So(parse("CREATE TABLE test (x varchar primary key,)"), shouldFailNear, ")")
+		So(parse("CREATE TABLE test (x blob, primary (x))"), shouldFailNear, "(x)")
+		So(parse("CREATE TABLE test (x blob, primary key)"), shouldFailNear, ")")
+		So(parse("CREATE TABLE test (x blob, primary key ()"), shouldFailNear, ")")
+		So(parse("CREATE TABLE test (x blob, primary key (x"), shouldFailNear, "")
+		So(parse("CREATE TABLE test (x blob, primary key (x,)"), shouldFailNear, ")")
+		So(parse("CREATE TABLE test (x blob, primary key (x,,"), shouldFailNear, ",")
+		So(parse("CREATE TABLE test (x blob, primary key (x)"), shouldFailNear, "")
+		So(parse("CREATE TABLE test (x varchar) WITH"), shouldFailNear, "")
+		So(parse("CREATE TABLE test (x varchar) WITH x ="), shouldFailNear, "")
+		So(parse("CREATE TABLE test (x varchar) WITH x 123"), shouldFailNear, "123")
+		So(parse("CREATE TABLE test (x blob, primary key (x)) garbage"), shouldFailNear, "garbage")
+		So(parse("CREATE TABLE test (x timeuuid) WITH x = 123 garbage"), shouldFailNear, "garbage")
+	})
 
-	if err := parse("CREATE TABLE t (x varchar, y blob PRIMARY KEY, z bigint)"); err != nil {
-		t.Fatal(err)
-	}
-	if len(cmd.colnames) != 3 {
-		t.Errorf("wrong cols: %+v", cmd)
-	}
-	if len(cmd.key) != 1 || cmd.key[0] != "y" {
-		t.Errorf("wrong key: %+v", cmd)
-	}
+	Convey("Simple table", t, func() {
+		So(parse("CREATE TABLE t (x varchar)"), shouldParse)
+		So(cmd.identifier, ShouldEqual, "t")
+		So(cmd.colnames, ShouldResemble, []string{"x"})
+		So(cmd.coltypes, ShouldResemble, []*gocql.TypeInfo{TIVarchar})
+		So(cmd.strict, ShouldBeTrue)
+	})
 
-	if err := parse("CREATE TABLE t (x blob, PRIMARY KEY (x, y), y blob)"); err != nil {
-		t.Fatal(err)
-	}
-	if len(cmd.colnames) != 2 {
-		t.Errorf("wrong cols: %+v", cmd)
-	}
-	if len(cmd.key) != 2 || cmd.key[0] != "x" || cmd.key[1] != "y" {
-		t.Errorf("wrong key: %+v", cmd)
-	}
+	Convey("COLUMNFAMILY should be an acceptable alternative for TABLE", t, func() {
+		So(parse("CREATE COLUMNFAMILY t (x varchar)"), shouldParse)
+		So(cmd.identifier, ShouldEqual, "t")
+	})
 
-	if err := parse("CREATE TABLE IF NOT EXISTS t (x blob PRIMARY KEY)"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.strict {
-		t.Errorf("strict should be false: %+v", cmd)
-	}
+	Convey("Primary keys", t, func() {
+		So(parse("CREATE TABLE t (x blob PRIMARY KEY)"), shouldParse)
+		So(cmd.key, ShouldResemble, []string{"x"})
+
+		So(parse("CREATE TABLE t (x blob, PRIMARY KEY (x, y), y blob)"), shouldParse)
+		So(cmd.key, ShouldResemble, []string{"x", "y"})
+	})
+
+	Convey("Multiple primary key definitions should be caught", t, func() {
+		So(parse("CREATE TABLE t (x blob primary key, primary key(x)) "), shouldFailNear, ") ")
+		So(parse("CREATE TABLE t (x blob primary key, y blob primary key)"),
+			shouldFailNear, ")")
+		So(parse("CREATE TABLE t (x blob, primary key(x), primary key (x)) "),
+			shouldFailNear, ") ")
+	})
+
+	Convey("IF NOT EXISTS", t, func() {
+		So(parse("CREATE TABLE IF NOT EXISTS t (x blob PRIMARY KEY)"), shouldParse)
+		So(cmd.strict, ShouldBeFalse)
+	})
+
+	Convey("Options should parse correctly", t, func() {
+		So(parse("CREATE TABLE test (x varchar) WITH x=1"), shouldParse)
+		expected := optionMap{"x": pval{Value: LiteralValue(1)}}
+		So(cmd.options, ShouldResemble, expected)
+
+		So(parse("CREATE TABLE test (x varchar) WITH x=1 AND y = 'str'"), shouldParse)
+		expected["y"] = pval{Value: LiteralValue("str")}
+		So(cmd.options, ShouldResemble, expected)
+	})
 }
 
 func TestParseDrop(t *testing.T) {
 	var cmd dropCommand
-	parse := func(s string) error { return parseInto(s, &cmd) }
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
 
-	if err := parse("DROP KEYSPACE x"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.dropType != "keyspace" {
-		t.Errorf("wrong droptype: %+v", cmd)
-	}
-	if cmd.identifier != "x" {
-		t.Errorf("wrong identifier: %+v", cmd)
-	}
-	if !cmd.strict {
-		t.Errorf("strict should be true: %+v", cmd)
-	}
+	Convey("Errors should be caught", t, func() {
+		So(parse("DROP"), shouldFailNear, "")
+		So(parse("DROP IF"), shouldFailNear, "IF")
+		So(parse("DROP test"), shouldFailNear, "test")
+		So(parse("DROP TABLE"), shouldFailNear, "")
+		So(parse("DROP TABLE KEYSPACE"), shouldFailNear, "KEYSPACE")
+		So(parse("DROP KEYSPACE IF"), shouldFailNear, "")
+		So(parse("DROP KEYSPACE IF x"), shouldFailNear, "")
+		So(parse("DROP KEYSPACE IF EXISTS 123"), shouldFailNear, "123")
+		So(parse("DROP KEYSPACE x IF EXISTS"), shouldFailNear, "IF EXISTS")
+	})
 
-	if err := parse("DROP TABLE x"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.dropType != "table" {
-		t.Errorf("wrong droptype: %+v", cmd)
-	}
-	if cmd.identifier != "x" {
-		t.Errorf("wrong identifier: %+v", cmd)
-	}
-	if !cmd.strict {
-		t.Errorf("strict should be true: %+v", cmd)
-	}
+	Convey("Basic DROP", t, func() {
+		So(parse("DROP KEYSPACE x"), shouldParse)
+		So(cmd.dropType, ShouldEqual, "keyspace")
+		So(cmd.identifier, ShouldEqual, "x")
+		So(cmd.strict, ShouldBeTrue)
 
-	if err := parse("DROP KEYSPACE IF EXISTS x"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.dropType != "keyspace" {
-		t.Errorf("wrong droptype: %+v", cmd)
-	}
-	if cmd.identifier != "x" {
-		t.Errorf("wrong identifier: %+v", cmd)
-	}
-	if cmd.strict {
-		t.Errorf("strict should be false: %+v", cmd)
-	}
+		So(parse("DROP TABLE x"), shouldParse)
+		So(cmd.dropType, ShouldEqual, "table")
+		So(cmd.identifier, ShouldEqual, "x")
+		So(cmd.strict, ShouldBeTrue)
+	})
 
-	if err := parse("DROP TABLE IF EXISTS x"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.dropType != "table" {
-		t.Errorf("wrong droptype: %+v", cmd)
-	}
-	if cmd.identifier != "x" {
-		t.Errorf("wrong identifier: %+v", cmd)
-	}
-	if cmd.strict {
-		t.Errorf("strict should be false: %+v", cmd)
-	}
+	Convey("IF EXISTS", t, func() {
+		So(parse("DROP KEYSPACE IF EXISTS x"), shouldParse)
+		So(cmd.dropType, ShouldEqual, "keyspace")
+		So(cmd.identifier, ShouldEqual, "x")
+		So(cmd.strict, ShouldBeFalse)
+
+		So(parse("DROP TABLE IF EXISTS x"), shouldParse)
+		So(cmd.dropType, ShouldEqual, "table")
+		So(cmd.identifier, ShouldEqual, "x")
+		So(cmd.strict, ShouldBeFalse)
+	})
 }
 
 func TestParseAlter(t *testing.T) {
 	var cmd alterCommand
-	parse := func(s string) error { return parseInto(s, &cmd) }
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
 
-	if err := parse("ALTER TABLE test ALTER x TYPE varchar"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "test" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if cmd.alter != "x" || cmd.add != "" || cmd.drop != "" {
-		t.Errorf("wrong cmd: %+v", cmd)
-	}
-	if cmd.coltype != TIVarchar {
-		t.Errorf("wrong coltype: %+v", cmd)
-	}
-	if len(cmd.options) != 0 {
-		t.Errorf("invalid options: %+v", cmd)
-	}
+	Convey("Change type", t, func() {
+		So(parse("ALTER TABLE test ALTER x TYPE varchar"), shouldParse)
+		So(cmd.table, ShouldEqual, "test")
+		So(cmd.alter, ShouldEqual, "x")
+		So(cmd.add, ShouldEqual, "")
+		So(cmd.drop, ShouldEqual, "")
+		So(cmd.options, ShouldBeNil)
+	})
 
-	if err := parse("ALTER TABLE test ADD x varchar"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.add != "x" || cmd.alter != "" || cmd.drop != "" {
-		t.Errorf("wrong cmd: %+v", cmd)
-	}
-	if cmd.coltype != TIVarchar {
-		t.Errorf("wrong coltype: %+v", cmd)
-	}
-	if len(cmd.options) != 0 {
-		t.Errorf("invalid options: %+v", cmd)
-	}
+	Convey("Add column", t, func() {
+		So(parse("ALTER TABLE test ADD x varchar"), shouldParse)
+		So(cmd.table, ShouldEqual, "test")
+		So(cmd.add, ShouldEqual, "x")
+		So(cmd.alter, ShouldEqual, "")
+		So(cmd.drop, ShouldEqual, "")
+		So(cmd.options, ShouldBeNil)
+	})
 
-	if err := parse("ALTER TABLE test DROP x"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.drop != "x" || cmd.add != "" || cmd.alter != "" {
-		t.Errorf("wrong cmd: %+v", cmd)
-	}
-	if cmd.coltype != nil {
-		t.Errorf("wrong coltype: %+v", cmd)
-	}
-	if len(cmd.options) != 0 {
-		t.Errorf("invalid options: %+v", cmd)
-	}
+	Convey("Drop column", t, func() {
+		So(parse("ALTER TABLE test DROP x"), shouldParse)
+		So(cmd.table, ShouldEqual, "test")
+		So(cmd.drop, ShouldEqual, "x")
+		So(cmd.add, ShouldEqual, "")
+		So(cmd.alter, ShouldEqual, "")
+		So(cmd.options, ShouldBeNil)
+	})
 
-	if err := parse("ALTER TABLE test WITH comment = 'comment'"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.drop != "" || cmd.add != "" || cmd.alter != "" {
-		t.Errorf("wrong cmd: %+v", cmd)
-	}
-	if cmd.coltype != nil {
-		t.Errorf("wrong coltype: %+v", cmd)
-	}
-	if len(cmd.options) != 1 || cmd.options["comment"] == "" {
-		t.Errorf("invalid options: %+v", cmd)
-	}
+	Convey("With options", t, func() {
+		So(parse("ALTER TABLE test WITH comment = 'comment'"), shouldParse)
+		expected := optionMap{"comment": pval{Value: LiteralValue("comment")}}
+		So(cmd.options, ShouldResemble, expected)
+
+		So(parse("ALTER TABLE test WITH comment = 'comment' AND x = 1"), shouldParse)
+		expected["x"] = pval{Value: LiteralValue(1)}
+		So(cmd.options, ShouldResemble, expected)
+	})
+
+	Convey("Parse errors should be caught", t, func() {
+		So(parse("ALTER test"), shouldFailNear, "test")
+		So(parse("ALTER ADD test"), shouldFailNear, "ADD")
+		So(parse("ALTER TABLE"), shouldFailNear, "")
+		So(parse("ALTER TABLE ADD"), shouldFailNear, "ADD")
+		So(parse("ALTER TABLE test"), shouldFailNear, "")
+		So(parse("ALTER TABLE test CREATE"), shouldFailNear, "CREATE")
+		So(parse("ALTER TABLE test ADD"), shouldFailNear, "")
+		So(parse("ALTER TABLE test ADD TYPE"), shouldFailNear, "TYPE")
+		So(parse("ALTER TABLE test ADD x"), shouldFailNear, "")
+		So(parse("ALTER TABLE test ADD x y"), shouldFailNear, "y")
+		So(parse("ALTER TABLE test ADD x TYPE varchar"), shouldFailNear, "TYPE")
+		So(parse("ALTER TABLE test ALTER x varchar"), shouldFailNear, "varchar")
+		So(parse("ALTER TABLE test ALTER x TYPE y"), shouldFailNear, "y")
+		So(parse("ALTER TABLE test DROP"), shouldFailNear, "")
+		So(parse("ALTER TABLE test DROP TYPE"), shouldFailNear, "TYPE")
+		So(parse("ALTER TABLE test WITH x 123"), shouldFailNear, "123")
+		So(parse("ALTER TABLE test DROP x garbage"), shouldFailNear, "garbage")
+	})
 }
 
 func TestParseInsert(t *testing.T) {
 	var cmd insertCommand
-	parse := func(s string) error { return parseInto(s, &cmd) }
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
 
-	if err := parse("INSERT INTO sometable (w) VALUES (?)"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "sometable" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if !reflect.DeepEqual([]string{"w"}, cmd.keys) {
-		t.Errorf("keys don't match: %+v", cmd)
-	}
-	if !reflect.DeepEqual([]pval{pval{VarIndex: 0}}, cmd.values) {
-		t.Errorf("values don't match: %+v", cmd)
-	}
-	if cmd.cas {
-		t.Errorf("cas should be false: %+v", cmd)
-	}
+	Convey("Inserting a single column value", t, func() {
+		So(parse("INSERT INTO sometable (w) VALUES (?)"), shouldParse)
+		So(cmd.table, ShouldEqual, "sometable")
+		So(cmd.keys, ShouldResemble, []string{"w"})
+		So(cmd.values, ShouldResemble, []pval{pval{VarIndex: 0}})
+		So(cmd.cas, ShouldBeFalse)
+	})
 
-	err := parse("INSERT INTO test (w, x, y, z) VALUES (1, ?, '3', ?) IF NOT EXISTS")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cmd.keys) != 4 || len(cmd.values) != 4 {
-		t.Errorf("should be 4 keys and 4 values: %+v", cmd)
-	}
-	if !cmd.cas {
-		t.Errorf("cas should be true: %+v", cmd)
-	}
+	Convey("Inserting multiple column values", t, func() {
+		So(parse("INSERT INTO test (w, x, y, z) VALUES (1, ?, '3', ?)"), shouldParse)
+		So(cmd.table, ShouldEqual, "test")
+		So(cmd.keys, ShouldResemble, []string{"w", "x", "y", "z"})
+		expectedValues := []pval{
+			pval{Value: LiteralValue(1)},
+			pval{VarIndex: 0},
+			pval{Value: LiteralValue("3")},
+			pval{VarIndex: 1},
+		}
+		So(cmd.values, ShouldResemble, expectedValues)
+		So(cmd.cas, ShouldBeFalse)
+	})
+
+	Convey("IF NOT EXISTS should set strict to true", t, func() {
+		So(parse("INSERT INTO test (w) VALUES (?) IF NOT EXISTS"), shouldParse)
+		So(cmd.cas, ShouldBeTrue)
+	})
+
+	Convey("Parse errors should be caught", t, func() {
+		So(parse("INSERT test"), shouldFailNear, "test")
+		So(parse("INSERT VALUES"), shouldFailNear, "VALUES")
+		So(parse("INSERT INTO VALUES"), shouldFailNear, "VALUES")
+		So(parse("INSERT INTO ("), shouldFailNear, "(")
+		So(parse("INSERT INTO test"), shouldFailNear, "")
+		So(parse("INSERT INTO test VALUES"), shouldFailNear, "VALUES")
+		So(parse("INSERT INTO test ()"), shouldFailNear, ")")
+		So(parse("INSERT INTO test (x)"), shouldFailNear, "")
+		So(parse("INSERT INTO test (x,)"), shouldFailNear, ")")
+		So(parse("INSERT INTO test (x y"), shouldFailNear, "y")
+		So(parse("INSERT INTO test (x) ("), shouldFailNear, "(")
+		So(parse("INSERT INTO test (x) VALUES"), shouldFailNear, "")
+		So(parse("INSERT INTO test (x) VALUES ?"), shouldFailNear, "?")
+		So(parse("INSERT INTO test (x) VALUES (?"), shouldFailNear, "")
+		So(parse("INSERT INTO test (x) VALUES (?,)"), shouldFailNear, ")")
+		So(parse("INSERT INTO test (x) VALUES (?) garbage"), shouldFailNear, "garbage")
+		So(parse("INSERT INTO test (x) VALUES (?) IF"), shouldFailNear, "")
+		So(parse("INSERT INTO test (x) VALUES (?) IF EXISTS"), shouldFailNear, "IF EXISTS")
+		So(parse("INSERT INTO test (x) VALUES (?) IF NOT"), shouldFailNear, "IF NOT")
+		So(parse("INSERT INTO test (x) VALUES (?) IF NOT x"), shouldFailNear, "IF NOT x")
+		So(parse("INSERT INTO test (x) VALUES (?) IF NOT EXISTS zzz"), shouldFailNear, "zzz")
+	})
 }
 
 func TestParseUpdate(t *testing.T) {
 	var cmd updateCommand
-	parse := func(s string) error { return parseInto(s, &cmd) }
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
 
-	if err := parse("UPDATE t SET x = 1 WHERE y = 2"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "t" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.set) != 1 || cmd.set["x"].Value == nil {
-		t.Errorf("wrong set: %+v", cmd)
-	}
-	if len(cmd.key) != 1 || cmd.key["y"].Value == nil {
-		t.Errorf("wrong set: %+v", cmd)
-	}
+	Convey("Updating a single column", t, func() {
+		So(parse("UPDATE t SET x = 1 WHERE y = 2"), shouldParse)
+		So(cmd.table, ShouldEqual, "t")
+		So(cmd.set, ShouldResemble, map[string]pval{"x": pval{Value: LiteralValue(1)}})
+		So(cmd.key, ShouldResemble, map[string]pval{"y": pval{Value: LiteralValue(2)}})
+	})
 
-	if err := parse("UPDATE t SET x = ?, z = 'z' WHERE w = ? AND y = 2"); err != nil {
-		t.Fatal(err)
-	}
-	if len(cmd.set) != 2 || cmd.set["x"].VarIndex != 0 || cmd.set["z"].Value == nil {
-		t.Errorf("wrong set: %+v", cmd)
-	}
-	if len(cmd.key) != 2 || cmd.key["w"].VarIndex != 1 || cmd.key["y"].Value == nil {
-		t.Errorf("wrong key: %+v", cmd)
-	}
+	Convey("Updating multiple columns", t, func() {
+		So(parse("UPDATE t SET x = ?, z = 'z' WHERE w = ? AND y = 2"), shouldParse)
+		expectedSet := map[string]pval{
+			"x": pval{VarIndex: 0},
+			"z": pval{Value: LiteralValue("z")},
+		}
+		So(cmd.set, ShouldResemble, expectedSet)
+		expectedSet = map[string]pval{
+			"w": pval{VarIndex: 1},
+			"y": pval{Value: LiteralValue(2)},
+		}
+		So(cmd.key, ShouldResemble, expectedSet)
+	})
+
+	Convey("Parse errors should be caught", t, func() {
+		So(parse("UPDATE"), shouldFailNear, "")
+		So(parse("UPDATE SET"), shouldFailNear, "SET")
+		So(parse("UPDATE t x"), shouldFailNear, "x")
+		So(parse("UPDATE t WHERE"), shouldFailNear, "WHERE")
+		So(parse("UPDATE t SET"), shouldFailNear, "")
+		So(parse("UPDATE t SET WHERE"), shouldFailNear, "WHERE")
+		So(parse("UPDATE t SET x ?"), shouldFailNear, "?")
+		So(parse("UPDATE t SET x = ?"), shouldFailNear, "")
+		So(parse("UPDATE t SET x = "), shouldFailNear, "")
+		So(parse("UPDATE t SET x = WHERE"), shouldFailNear, "WHERE")
+		So(parse("UPDATE t SET x = ?, WHERE"), shouldFailNear, "WHERE")
+		So(parse("UPDATE t SET x = ? AND"), shouldFailNear, "AND")
+		So(parse("UPDATE t SET x = ? WHERE"), shouldFailNear, "")
+		So(parse("UPDATE t SET x = ? WHERE y"), shouldFailNear, "")
+		So(parse("UPDATE t SET x = ? WHERE y ="), shouldFailNear, "")
+		So(parse("UPDATE t SET x = ? WHERE y = AND"), shouldFailNear, "AND")
+		So(parse("UPDATE t SET x = ? WHERE y = ?,"), shouldFailNear, ",")
+		So(parse("UPDATE t SET x = ? WHERE y = ? AND"), shouldFailNear, "")
+		So(parse("UPDATE t SET x = ? WHERE y = ? garbage"), shouldFailNear, "garbage")
+	})
 }
 
 func TestParseDelete(t *testing.T) {
 	var cmd deleteCommand
-	parse := func(s string) error { return parseInto(s, &cmd) }
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
 
-	if err := parse("DELETE FROM t WHERE x = 1"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "t" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.key) != 1 || cmd.key["x"].Value == nil {
-		t.Errorf("wrong key: %+v", cmd)
-	}
+	Convey("Valid commands should parse", t, func() {
+		So(parse("DELETE FROM t WHERE x = 1"), shouldParse)
+		So(cmd.table, ShouldEqual, "t")
+		expected := map[string]pval{"x": pval{Value: LiteralValue(1)}}
+		So(cmd.key, ShouldResemble, expected)
 
-	if err := parse("DELETE FROM t WHERE x = 1 AND y = 2"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "t" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.key) != 2 || cmd.key["x"].Value == nil || cmd.key["y"].Value == nil {
-		t.Errorf("wrong key: %+v", cmd)
-	}
+		So(parse("DELETE FROM t WHERE x = 1 AND y = 2"), shouldParse)
+		So(cmd.table, ShouldEqual, "t")
+		expected["y"] = pval{Value: LiteralValue(2)}
+		So(cmd.key, ShouldResemble, expected)
+	})
+
+	Convey("Parse errors should be caught", t, func() {
+		So(parse("DELETE t"), shouldFailNear, "t")
+		So(parse("DELETE WHERE"), shouldFailNear, "WHERE")
+		So(parse("DELETE FROM"), shouldFailNear, "")
+		So(parse("DELETE FROM WHERE"), shouldFailNear, "WHERE")
+		So(parse("DELETE FROM t"), shouldFailNear, "")
+		So(parse("DELETE FROM t IF"), shouldFailNear, "IF")
+		So(parse("DELETE FROM t x"), shouldFailNear, "x")
+		So(parse("DELETE FROM t WHERE"), shouldFailNear, "")
+		So(parse("DELETE FROM t WHERE x"), shouldFailNear, "")
+		So(parse("DELETE FROM t WHERE x ?"), shouldFailNear, "?")
+		So(parse("DELETE FROM t WHERE x ="), shouldFailNear, "")
+		So(parse("DELETE FROM t WHERE x = ? AND"), shouldFailNear, "")
+		So(parse("DELETE FROM t WHERE x = ? AND y"), shouldFailNear, "")
+		So(parse("DELETE FROM t WHERE x = ? garbage"), shouldFailNear, "garbage")
+	})
 }
 
 func TestParseSelect(t *testing.T) {
 	var cmd selectCommand
-	parse := func(s string) error { return parseInto(s, &cmd) }
+	parse := func(s string) pToken { return parseInto(s, &cmd) }
 
-	if err := parse("SELECT * FROM t"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "t" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.cols) != 1 || cmd.cols[0] != "*" {
-		t.Errorf("wrong cols: %+v", cmd)
-	}
-	if len(cmd.where) != 0 {
-		t.Errorf("wrong where: %+v", cmd)
-	}
-	if len(cmd.order) != 0 {
-		t.Errorf("wrong order: %+v", cmd)
-	}
-	if cmd.limit != 0 {
-		t.Errorf("wrong limit: %+v", cmd)
-	}
+	Convey("Selection columns", t, func() {
+		So(parse("SELECT x FROM t"), shouldParse)
+		So(cmd.table, ShouldEqual, "t")
+		So(cmd.cols, ShouldResemble, []string{"x"})
+		/*
+		   So(cmd.where, ShouldResemble, []comparison{})
+		   So(cmd.order, ShouldResemble, []order{})
+		*/
+		So(len(cmd.where), ShouldEqual, 0)
+		So(len(cmd.order), ShouldEqual, 0)
+		So(cmd.limit, ShouldEqual, 0)
 
-	if err := parse("SELECT COUNT(1) FROM t WHERE x >= ? LIMIT 1"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "t" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.cols) != 1 || cmd.cols[0] != "count(*)" {
-		t.Errorf("wrong cols: %+v", cmd)
-	}
-	if len(cmd.where) != 1 || cmd.where[0].col != "x" || cmd.where[0].op != ">=" {
-		t.Errorf("wrong where: %+v", cmd)
-	}
-	if len(cmd.order) != 0 {
-		t.Errorf("wrong order: %+v", cmd)
-	}
-	if cmd.limit != 1 {
-		t.Errorf("wrong limit: %+v", cmd)
-	}
+		So(parse("SELECT x, y, z FROM t"), shouldParse)
+		So(cmd.cols, ShouldResemble, []string{"x", "y", "z"})
 
-	if err := parse("SELECT x, y, z FROM t WHERE x = ? AND y > 0 ORDER BY z"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "t" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.cols) != 3 || cmd.cols[0] != "x" || cmd.cols[1] != "y" || cmd.cols[2] != "z" {
-		t.Errorf("wrong cols: %+v", cmd)
-	}
-	if len(cmd.where) != 2 || cmd.where[0].col != "x" || cmd.where[1].col != "y" {
-		t.Errorf("wrong where: %+v", cmd)
-	}
-	if len(cmd.order) != 1 || cmd.order[0].col != "z" || cmd.order[0].dir != asc {
-		t.Errorf("wrong order: %+v", cmd)
-	}
-	if cmd.limit != 0 {
-		t.Errorf("wrong limit: %+v", cmd)
-	}
+		So(parse("SELECT * FROM t"), shouldParse)
+		So(cmd.cols, ShouldResemble, []string{"*"})
 
-	if err := parse("SELECT * FROM t ORDER BY x DESC, y LIMIT 3"); err != nil {
-		t.Fatal(err)
-	}
-	if cmd.table != "t" {
-		t.Errorf("wrong table: %+v", cmd)
-	}
-	if len(cmd.order) != 2 || cmd.order[0].col != "x" || cmd.order[0].dir != desc {
-		t.Errorf("wrong order: %+v", cmd)
-	}
-	if cmd.order[1].col != "y" || cmd.order[1].dir != asc {
-		t.Errorf("wrong order: %+v", cmd)
-	}
-	if cmd.limit != 3 {
-		t.Errorf("wrong limit: %+v", cmd)
-	}
+		So(parse("SELECT COUNT(*) FROM t"), shouldParse)
+		So(cmd.cols, ShouldResemble, []string{"count(*)"})
+
+		So(parse("SELECT COUNT(1) FROM t"), shouldParse)
+		So(cmd.cols, ShouldResemble, []string{"count(*)"})
+	})
+
+	Convey("Where conditions", t, func() {
+		So(parse("SELECT * FROM t WHERE x >= ?"), shouldParse)
+		expected := make([]comparison, 0)
+		expected = append(expected, comparison{"x", ">=", pval{VarIndex: 0}})
+		So(cmd.where, ShouldResemble, expected)
+
+		So(parse("SELECT * FROM t WHERE x >= ? AND y = 1 AND z < ?"), shouldParse)
+		expected = append(expected,
+			comparison{"y", "=", pval{Value: LiteralValue(1)}},
+			comparison{"z", "<", pval{VarIndex: 1}})
+		So(cmd.where, ShouldResemble, expected)
+	})
+
+	Convey("Orderings", t, func() {
+		So(parse("SELECT * FROM t ORDER BY x"), shouldParse)
+		expected := make([]order, 0)
+		expected = append(expected, order{"x", asc})
+		So(cmd.order, ShouldResemble, expected)
+
+		So(parse("SELECT * FROM t WHERE x = ? ORDER BY x LIMIT 1"), shouldParse)
+		So(cmd.where, ShouldResemble, []comparison{comparison{"x", "=", pval{VarIndex: 0}}})
+		So(cmd.order, ShouldResemble, expected)
+
+		So(parse("SELECT * FROM t ORDER BY x, y DESC, z ASC"), shouldParse)
+		expected = append(expected, order{"y", desc}, order{"z", asc})
+		So(cmd.order, ShouldResemble, expected)
+	})
+
+	Convey("Limit", t, func() {
+		So(parse("SELECT * FROM t LIMIT 1"), shouldParse)
+		So(cmd.limit, ShouldEqual, 1)
+
+		So(parse("SELECT * FROM t WHERE x = ? LIMIT 1"), shouldParse)
+		So(cmd.where, ShouldResemble, []comparison{comparison{"x", "=", pval{VarIndex: 0}}})
+		So(cmd.limit, ShouldEqual, 1)
+
+		So(parse("SELECT * FROM t ORDER BY x DESC LIMIT 1"), shouldParse)
+		So(cmd.order, ShouldResemble, []order{order{"x", desc}})
+		So(cmd.limit, ShouldEqual, 1)
+
+		So(parse("SELECT * FROM t WHERE x = ? ORDER BY x DESC LIMIT 8421"), shouldParse)
+		So(cmd.where, ShouldResemble, []comparison{comparison{"x", "=", pval{VarIndex: 0}}})
+		So(cmd.order, ShouldResemble, []order{order{"x", desc}})
+		So(cmd.limit, ShouldEqual, 8421)
+	})
+
+	Convey("Parse errors should be caught", t, func() {
+		So(parse("SELECT COUNT"), shouldFailNear, "")
+		So(parse("SELECT COUNT *"), shouldFailNear, "*")
+		So(parse("SELECT COUNT("), shouldFailNear, "")
+		So(parse("SELECT COUNT()"), shouldFailNear, ")")
+		So(parse("SELECT COUNT(x)"), shouldFailNear, "x")
+		So(parse("SELECT COUNT(*"), shouldFailNear, "")
+		So(parse("SELECT COUNT(123"), shouldFailNear, "")
+		So(parse("SELECT FROM"), shouldFailNear, "FROM")
+		So(parse("SELECT * t"), shouldFailNear, "t")
+		So(parse("SELECT *,"), shouldFailNear, ",")
+		So(parse("SELECT count(*),"), shouldFailNear, ",")
+		So(parse("SELECT x, FROM"), shouldFailNear, "FROM")
+		So(parse("SELECT x, *"), shouldFailNear, "*")
+		So(parse("SELECT * FROM WHERE"), shouldFailNear, "WHERE")
+		So(parse("SELECT * FROM t WHERE"), shouldFailNear, "")
+		So(parse("SELECT * FROM t WHERE >"), shouldFailNear, ">")
+		So(parse("SELECT * FROM t WHERE x"), shouldFailNear, "")
+		So(parse("SELECT * FROM t WHERE x <>"), shouldFailNear, ">")
+		So(parse("SELECT * FROM t WHERE x !="), shouldFailNear, "!=")
+		So(parse("SELECT * FROM t WHERE x ,"), shouldFailNear, ",")
+		So(parse("SELECT * FROM t WHERE x ="), shouldFailNear, "")
+		So(parse("SELECT * FROM t WHERE x = ? AND"), shouldFailNear, "")
+		So(parse("SELECT * FROM t WHERE x = ? AND ORDER BY"), shouldFailNear, "ORDER")
+		So(parse("SELECT * FROM t WHERE x = ? ORDER x"), shouldFailNear, "x")
+		So(parse("SELECT * FROM t WHERE x = ? ORDER DESC x"), shouldFailNear, "DESC")
+		So(parse("SELECT * FROM t WHERE x = ? ORDER BY"), shouldFailNear, "")
+		So(parse("SELECT * FROM t WHERE x = ? ORDER BY x,"), shouldFailNear, "")
+		So(parse("SELECT * FROM t WHERE x = ? ORDER BY x, LIMIT"), shouldFailNear, "LIMIT")
+		So(parse("SELECT * FROM t WHERE x = ? LIMIT"), shouldFailNear, "")
+		So(parse("SELECT * FROM t WHERE x = ? LIMIT x"), shouldFailNear, "x")
+		So(parse("SELECT * FROM t garbage"), shouldFailNear, "garbage")
+		So(parse("SELECT * FROM t WHERE x = ? garbage"), shouldFailNear, "garbage")
+		So(parse("SELECT * FROM t ORDER BY x garbage"), shouldFailNear, "garbage")
+		So(parse("SELECT * FROM t ORDER BY x DESC garbage"), shouldFailNear, "garbage")
+		So(parse("SELECT * FROM t WHERE x = ? LIMIT garbage"), shouldFailNear, "garbage")
+	})
 }
