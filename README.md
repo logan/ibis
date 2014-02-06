@@ -1,4 +1,4 @@
-ibis
+ibis [![GoDoc](https://godoc.org/github.com/logan/ibis?status.png)](http://godoc.org/github.com/logan/ibis)
 ====
 
 Package ibis provides a higher-level interface to the wonderful
