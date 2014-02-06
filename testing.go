@@ -1,6 +1,8 @@
 package ibis
 
+import "errors"
 import "flag"
+import "fmt"
 import "strconv"
 import "strings"
 import "testing"
@@ -55,6 +57,14 @@ func NewTestConn(t *testing.T) Cluster {
 	return &testConn{c}
 }
 
+type wrapError struct {
+	err     error
+	wrapped error
+}
+
+func WrapError(msg string, err error) error { return wrapError{errors.New(msg), err} }
+func (wrap wrapError) Error() string        { return fmt.Sprintf("%s: %s", wrap.err, wrap.wrapped) }
+
 func initKeyspace(config CassandraConfig) error {
 	c, err := connect(config)
 	if err != nil {
@@ -67,7 +77,7 @@ func initKeyspace(config CassandraConfig) error {
 	cql.Cluster(c)
 	qiter := cql.Query()
 	if err := qiter.Exec(); err != nil {
-		return err
+		return WrapError("drop keyspace failed:", err)
 	}
 
 	b.Clear()
@@ -75,7 +85,10 @@ func initKeyspace(config CassandraConfig) error {
 	b.Append(" WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}")
 	cql = b.CQL()
 	cql.Cluster(c)
-	return cql.Query().Exec()
+	if err := cql.Query().Exec(); err != nil {
+		return WrapError("create keyspace failed:", err)
+	}
+	return nil
 }
 
 func (tc *testConn) Close() {
