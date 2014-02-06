@@ -1,5 +1,7 @@
-ibis [![GoDoc](https://godoc.org/github.com/logan/ibis?status.png)](http://godoc.org/github.com/logan/ibis)
+ibis
 ====
+[![TravisCI](https://travis-ci.org/logan/ibis.png)](https://travis-ci.org/logan/ibis)
+[![GoDoc](https://godoc.org/github.com/logan/ibis?status.png)](http://godoc.org/github.com/logan/ibis)
 
 Package ibis provides a higher-level interface to the wonderful
 [github.com/gocql/gocql](http://tux21b.org/gocql/) package.
