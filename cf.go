@@ -38,7 +38,7 @@ func CFProviderFunc(provider func() *CF) CFProvider { return cfProviderFunc(prov
 type CF struct {
 	// data definition
 	name       string
-	columns    []*Column
+	columns    []Column
 	primaryKey []string
 
 	// plumbing
@@ -49,7 +49,7 @@ type CF struct {
 	precommitHooks []PrecommitHook
 }
 
-func NewCF(name string, columns ...*Column) *CF {
+func NewCF(name string, columns ...Column) *CF {
 	return &CF{name: name, columns: columns}
 }
 
@@ -89,7 +89,7 @@ func (cf *CF) SetPrimaryKey(keys ...string) *CF {
 	cf.primaryKey = keys
 
 	// primary key columns must come first and in order
-	rearranged := make([]*Column, len(cf.columns))
+	rearranged := make([]Column, len(cf.columns))
 	keymap := make(map[string]bool)
 	for i, k := range keys {
 		for _, col := range cf.columns {
@@ -153,8 +153,8 @@ func (cf *CF) fillFromRowType(row_type reflect.Type) {
 	cf.columns = columnsFromStructType(row_type)
 }
 
-func columnsFromStructType(struct_type reflect.Type) []*Column {
-	cols := make([]*Column, 0, struct_type.NumField())
+func columnsFromStructType(struct_type reflect.Type) []Column {
+	cols := make([]Column, 0, struct_type.NumField())
 	for i := 0; i < struct_type.NumField(); i++ {
 		field := struct_type.Field(i)
 		if col, ok := columnFromStructField(field); ok {
@@ -166,12 +166,12 @@ func columnsFromStructType(struct_type reflect.Type) []*Column {
 	return cols
 }
 
-func columnFromStructField(field reflect.StructField) (*Column, bool) {
+func columnFromStructField(field reflect.StructField) (Column, bool) {
 	ts, ok := goTypeToCassType(field.Type)
 	if ok {
-		return &Column{field.Name, ts, typeInfoMap[ts], field.Tag}, true
+		return Column{field.Name, ts, typeInfoMap[ts], field.Tag}, true
 	}
-	return nil, ok
+	return Column{}, ok
 }
 
 func goTypeToCassType(t reflect.Type) (string, bool) {

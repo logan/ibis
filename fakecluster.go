@@ -47,10 +47,11 @@ type fakeCluster struct {
 // FakeCassandra returns a Cluster interface to an in-memory imitation of Cassandra. This is great
 // for unit testing, but beware that the fake implementation is quite rudimentary, incomplete, and
 // probably inaccurate.
-func FakeCassandra() Cluster {
+func FakeCassandra(keyspace string) Cluster {
 	c := &fakeCluster{Keyspaces: make(map[string]*fakeKeyspace)}
 	c.AddKeyspace("system")
-	c.CurrentKeyspace = "system"
+	c.AddKeyspace(keyspace)
+	c.CurrentKeyspace = keyspace
 	return c
 }
 
@@ -75,7 +76,7 @@ func (c *fakeCluster) Query(stmts ...CQL) Query {
 		}
 		ks, ok := c.Keyspaces[c.CurrentKeyspace]
 		if !ok || ks == nil {
-			c.Keyspaces[c.CurrentKeyspace] = new(fakeKeyspace)
+			return &fakeQuery{err: errors.New("keyspace doesn't exist: " + c.CurrentKeyspace)}
 		}
 		var err error
 		results, err = parser.Execute(c.Keyspaces[c.CurrentKeyspace], stmt.params...)
@@ -202,7 +203,7 @@ func (q *fakeQuery) scan(dests []interface{}, cas bool) bool {
 	for i, addr := range dests {
 		val := result.Row[result.Columns[i]]
 		if val == nil {
-			return false
+			continue
 		}
 		if err := gocql.Unmarshal(val.TypeInfo, val.Bytes, addr); err != nil {
 			q.err = err

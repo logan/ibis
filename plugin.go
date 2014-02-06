@@ -4,7 +4,7 @@ import "errors"
 import "reflect"
 
 type ColumnTagApplier interface {
-	ApplyTag(tagValue string, cf *CF, col *Column) error
+	ApplyTag(tagValue string, cf *CF, col Column) error
 }
 
 type ColumnTags struct {
@@ -18,7 +18,7 @@ func (t *ColumnTags) Register(name string, applier ColumnTagApplier) {
 	t.tags[name] = applier
 }
 
-func (t *ColumnTags) applyAll(tag reflect.StructTag, cf *CF, col *Column) []error {
+func (t *ColumnTags) applyAll(tag reflect.StructTag, cf *CF, col Column) []error {
 	errors := make([]error, 0)
 	for name, applier := range t.tags {
 		if name == "" {
@@ -46,7 +46,7 @@ func (plugin defaultPlugin) RegisterColumnTags(tags *ColumnTags) {
 	tags.Register("", plugin)
 }
 
-func (plugin defaultPlugin) ApplyTag(value string, cf *CF, col *Column) error {
+func (plugin defaultPlugin) ApplyTag(value string, cf *CF, col Column) error {
 	switch {
 	case value == "key":
 		if cf.primaryKey == nil {

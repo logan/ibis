@@ -26,7 +26,7 @@ func (g *FakeSeqIDGenerator) NewSeqID() (SeqID, error) {
 
 func connect(config CassandraConfig) (Cluster, error) {
 	if config.Node[0] == "" {
-		return FakeCassandra(), nil
+		return FakeCassandra(*flagKeyspace), nil
 	}
 	return DialCassandra(config)
 }
@@ -88,6 +88,7 @@ func initKeyspace(config CassandraConfig) error {
 	if err := cql.Query().Exec(); err != nil {
 		return WrapError("create keyspace failed:", err)
 	}
+
 	return nil
 }
 

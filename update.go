@@ -54,8 +54,8 @@ func (d *SchemaDiff) Apply(cluster Cluster) error {
 
 type tableAlteration struct {
 	TableName      string
-	NewColumns     []*Column
-	AlteredColumns []*Column
+	NewColumns     []Column
+	AlteredColumns []Column
 }
 
 func (a tableAlteration) Size() int {
@@ -94,15 +94,14 @@ func GetLiveSchema(c Cluster) (*Schema, error) {
 	for _, t := range tables {
 		schema.CFs[strings.ToLower(t.name)] = t
 	}
-	cf := &CF{name: "system.schema_columns"}
 	sel := Select("columnfamily_name", "column_name", "validator").
-		From(cf).Where("keyspace_name = ?", c.GetKeyspace())
+		From(NewCF("system.schema_columns")).Where("keyspace_name = ?", c.GetKeyspace())
 	cql := sel.CQL()
 	cql.Cluster(c)
 	qiter := cql.Query()
 	var cf_name, col_name, validator string
 	for qiter.Scan(&cf_name, &col_name, &validator) {
-		col := &Column{Name: col_name, Type: typeFromValidator(validator)}
+		col := Column{Name: col_name, Type: typeFromValidator(validator)}
 		t := schema.CFs[cf_name]
 		if t != nil {
 			t.columns = append(t.columns, col)
@@ -126,7 +125,7 @@ func getLiveColumnFamilies(cluster Cluster, keyspace string) ([]*CF, int, error)
 	var cf_name, key_aliases, column_aliases, comment string
 	maxTypeID := 0
 	for qiter.Scan(&cf_name, &key_aliases, &column_aliases, &comment) {
-		t := CF{name: cf_name, columns: make([]*Column, 0, 16)}
+		t := CF{name: cf_name, columns: make([]Column, 0, 16)}
 		t.SetPrimaryKey(keyFromAliases(key_aliases, column_aliases)...)
 		t.typeID = typeIDFromComment(comment)
 		if t.typeID > maxTypeID {
@@ -186,7 +185,7 @@ func DiffLiveSchema(c Cluster, model *Schema) (*SchemaDiff, error) {
 	for name, model_table := range model.CFs {
 		live_table, ok := live.CFs[strings.ToLower(name)]
 		if ok {
-			alteration := tableAlteration{name, make([]*Column, 0), make([]*Column, 0)}
+			alteration := tableAlteration{name, make([]Column, 0), make([]Column, 0)}
 			old_cols := make(map[string]string)
 			for _, col := range live_table.columns {
 				old_cols[strings.ToLower(col.Name)] = col.Type

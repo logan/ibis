@@ -37,7 +37,8 @@ func (s *statement) Execute(ks *fakeKeyspace, params ...interface{}) (resultSet,
 	for i, param := range params {
 		bind[i] = LiteralValue(param)
 	}
-	return s.cmd.Execute(ks, bind)
+	rs, err := s.cmd.Execute(ks, bind)
+	return rs, err
 }
 
 type pStmt struct {
@@ -158,6 +159,8 @@ func pStatement(t pToken) pToken {
 		t = pSelect(u)
 	case "update":
 		t = pUpdate(u)
+	case "use":
+		t = pUse(u)
 	default:
 		return t.fail("invalid command: ", keyword)
 	}
@@ -165,6 +168,15 @@ func pStatement(t pToken) pToken {
 		return t.fail("trailing text after complete statement")
 	}
 	return t
+}
+
+func pUse(t pToken) pToken {
+	var cmd useCommand
+	if t = pTermId(t); t.err != nil {
+		return t
+	}
+	cmd.identifier = string(t.ctx.(termId))
+	return t.with(&cmd)
 }
 
 func pCreate(t pToken) pToken {
@@ -896,6 +908,8 @@ func pSkipAll(t pToken) pToken {
 
 func isKeyword(id string) bool {
 	switch id {
+	case "use":
+		return true
 	case "create":
 		return true
 	case "drop":

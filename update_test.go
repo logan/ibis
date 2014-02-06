@@ -32,13 +32,13 @@ func TestGetLiveSchema(t *testing.T) {
 
 	expected := CF{
 		name: "test",
-		columns: []*Column{
-			&Column{Name: "blobcol", Type: "blob"},
-			&Column{Name: "boolcol", Type: "boolean"},
-			&Column{Name: "float64col", Type: "double"},
-			&Column{Name: "int64col", Type: "bigint"},
-			&Column{Name: "stringcol", Type: "varchar"},
-			&Column{Name: "timecol", Type: "timestamp"},
+		columns: []Column{
+			Column{Name: "blobcol", Type: "blob"},
+			Column{Name: "boolcol", Type: "boolean"},
+			Column{Name: "float64col", Type: "double"},
+			Column{Name: "int64col", Type: "bigint"},
+			Column{Name: "stringcol", Type: "varchar"},
+			Column{Name: "timecol", Type: "timestamp"},
 		},
 	}
 	expected.SetPrimaryKey("stringcol", "int64col", "boolcol")
@@ -69,8 +69,8 @@ func TestDiffLiveSchema(t *testing.T) {
 	model := &Schema{
 		CFs: Keyspace{
 			"T1": NewCF("T1",
-				&Column{Name: "A", Type: "varchar"},
-				&Column{Name: "B", Type: "varchar"}).SetPrimaryKey("A"),
+				Column{Name: "A", Type: "varchar"},
+				Column{Name: "B", Type: "varchar"}).SetPrimaryKey("A"),
 		},
 		Cluster: cluster,
 	}
@@ -89,15 +89,15 @@ func TestDiffLiveSchema(t *testing.T) {
 	}
 
 	model.CFs["T1"].columns[1].Type = "blob"
-	model.CFs["T1"].columns = append(model.CFs["T1"].columns, &Column{Name: "C", Type: "bigint"})
-	model.CFs["T2"] = NewCF("T2", &Column{Name: "X", Type: "varchar"}).SetPrimaryKey("X")
+	model.CFs["T1"].columns = append(model.CFs["T1"].columns, Column{Name: "C", Type: "bigint"})
+	model.CFs["T2"] = NewCF("T2", Column{Name: "X", Type: "varchar"}).SetPrimaryKey("X")
 	expected = &SchemaDiff{
 		creations: []*CF{model.CFs["T2"]},
 		alterations: []tableAlteration{
 			tableAlteration{
 				TableName:      "T1",
 				NewColumns:     model.CFs["T1"].columns[2:],
-				AlteredColumns: []*Column{model.CFs["T1"].columns[1]},
+				AlteredColumns: []Column{model.CFs["T1"].columns[1]},
 			},
 		},
 	}

@@ -53,7 +53,7 @@ func (s *Schema) Provide(x interface{}) {
 // interface pointed to by dest. If none is found, one will be retrieved from the schema's own list
 // of providers.
 //
-// A panic will occur if dest is not a pointer to an interface.
+// A panic will occur if dest is not a pointer.
 //
 // If multiple compatible providers are registered across the schema, an arbitrary one will be used.
 // If a compatible provider is found, it is copied into *dest and true is returned. Otherwise
@@ -68,13 +68,13 @@ func (s *Schema) GetProvider(dest interface{}) bool {
 	if destPtrType.Kind() != reflect.Ptr {
 		panic("destination must be a pointer to an interface")
 	}
-	if s.provisions == nil {
-		return false
-	}
 	destValue := reflect.ValueOf(dest).Elem()
 	destType := destValue.Type()
 	if destType.Kind() != reflect.Interface {
 		panic("destination must be a pointer to an interface")
+	}
+	if s.provisions == nil {
+		return false
 	}
 	for _, provision := range s.provisions {
 		if provision.Type().ConvertibleTo(destType) {
@@ -103,7 +103,7 @@ func (s *Schema) DialCassandra(config CassandraConfig) error {
 // RequiresUpdates returns true if this schema differs from the existing column families in the
 // connected cluster.
 func (s *Schema) RequiresUpdates() bool {
-	return s.SchemaUpdates.Size() > 0
+	return s.SchemaUpdates != nil && s.SchemaUpdates.Size() > 0
 }
 
 // ApplySchemaUpdates applies any required modifications to the live schema to match this one.

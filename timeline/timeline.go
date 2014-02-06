@@ -208,7 +208,7 @@ func (plugin *TimelinePlugin) RegisterColumnTags(tags *ibis.ColumnTags) {
 	tags.Register("timeline", plugin)
 }
 
-func (plugin *TimelinePlugin) ApplyTag(value string, cf *ibis.CF, col *ibis.Column) error {
+func (plugin *TimelinePlugin) ApplyTag(value string, cf *ibis.CF, col ibis.Column) error {
 	defs, err := parseTimelineDefs(value)
 	if defs != nil {
 		if plugin.precommitters == nil {

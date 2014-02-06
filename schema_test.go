@@ -1,8 +1,9 @@
 package ibis
 
-import "fmt"
 import "reflect"
 import "testing"
+
+import . "github.com/smartystreets/goconvey/convey"
 
 type row struct {
 	Str string `ibis:"key"`
@@ -18,6 +19,39 @@ func (t *table) NewCF() *CF {
 	return t.cf
 }
 
+func TestSchemaMiscellanea(t *testing.T) {
+	Convey("IsBound", t, func() {
+		schema := NewSchema()
+		So(schema.IsBound(), ShouldBeFalse)
+		schema.Cluster = NewTestConn(t)
+		So(schema.IsBound(), ShouldBeTrue)
+	})
+
+	Convey("RequiresUpdates", t, func() {
+		var (
+			m   struct{ T *table }
+			err error
+		)
+		cluster := NewTestConn(t)
+		schema := ReflectSchema(&m)
+		So(schema.RequiresUpdates(), ShouldBeFalse)
+
+		schema.SchemaUpdates, err = DiffLiveSchema(cluster, schema)
+		So(err, ShouldBeNil)
+		So(schema.RequiresUpdates(), ShouldBeTrue)
+
+		schema.Cluster = cluster
+		err = schema.ApplySchemaUpdates()
+		So(err, ShouldBeNil)
+
+		schema = ReflectSchema(&m)
+		schema.SchemaUpdates, err = DiffLiveSchema(cluster, schema)
+
+		So(err, ShouldBeNil)
+		So(schema.RequiresUpdates(), ShouldBeFalse)
+	})
+}
+
 func TestReflectSchema(t *testing.T) {
 	type model struct {
 		Defined    *CF
@@ -25,43 +59,90 @@ func TestReflectSchema(t *testing.T) {
 		unexported *table // having this here shouldn't break anything
 	}
 
-	expectedColumns := []*Column{
-		&Column{Name: "Str", Type: "varchar", typeInfo: TIVarchar},
-		&Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
-	}
-
 	m := &model{}
+	expectedColumns := []Column{
+		Column{Name: "Str", Type: "varchar", typeInfo: TIVarchar},
+		Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
+	}
 	m.Defined = NewCF("Defined", expectedColumns...).SetPrimaryKey("Str")
 	schema := ReflectSchema(m)
 	expectedPrimaryKey := []string{"Str"}
 
-	checkTable := func(name string) (string, bool) {
-		cf, ok := schema.CFs[name]
-		if !ok {
-			return fmt.Sprintf("column family %#v wasn't included", name), false
-		}
-		if len(expectedColumns) != len(cf.columns) {
-			return fmt.Sprintf("\nexpected columns: %+v\nreceived columns: %+v",
-				expectedColumns, cf.columns), false
-		}
-		for i, exp := range expectedColumns {
-			col := cf.columns[i]
-			if exp.Name != col.Name || exp.Type != col.Type {
-				return fmt.Sprintf("\nexpected column: %+v\nreceived column: %+v",
-					*exp, *col), false
-			}
-		}
-		if !reflect.DeepEqual(expectedPrimaryKey, cf.primaryKey) {
-			return fmt.Sprintf("\nexpected primary key: %+v\nreceived primary key: %+v",
-				expectedColumns, cf.columns), false
-		}
-		return "", true
-	}
+	Convey("Boilerplate-y table definition", t, func() {
+		cf, ok := schema.CFs["defined"]
+		So(ok, ShouldBeTrue)
+		So(cf.primaryKey, ShouldResemble, expectedPrimaryKey)
+		So(cf.columns, ShouldResemble, expectedColumns)
+	})
 
-	if msg, ok := checkTable("defined"); !ok {
-		t.Error(msg)
-	}
-	if msg, ok := checkTable("reflected"); !ok {
-		t.Error(msg)
-	}
+	Convey("Reflected table definition", t, func() {
+		cf, ok := schema.CFs["reflected"]
+		So(ok, ShouldBeTrue)
+		So(cf.primaryKey, ShouldResemble, expectedPrimaryKey)
+		cols := make([]Column, len(expectedColumns))
+		for i, col := range expectedColumns {
+			cols[i] = col
+		}
+		cols[0].tag = reflect.StructTag(`ibis:"key"`)
+		So(cf.columns, ShouldResemble, cols)
+	})
+
+	Convey("Should panic on invalid argument", t, func() {
+		So(func() { ReflectSchema(8) }, ShouldPanicWith, "model must be pointer to struct")
+		So(func() { ReflectSchema(model{}) }, ShouldPanicWith, "model must be pointer to struct")
+	})
+}
+
+type providerTester interface {
+	Test() string
+}
+type providerTest string
+
+func (t providerTest) Test() string { return string(t) }
+
+func TestGetProviderFromSchema(t *testing.T) {
+	Convey("GetProvider should fall back to schema", t, func() {
+		cf := NewCF("test")
+		schema := NewSchema()
+		schema.AddCF(cf)
+
+		var p providerTester
+		So(schema.GetProvider(&p), ShouldBeFalse)
+
+		schema.Provide(providerTester(providerTest("schema")))
+		So(schema.GetProvider(&p), ShouldBeTrue)
+		So(p.Test(), ShouldEqual, "schema")
+
+		cf.Provide(providerTester(providerTest("cf")))
+		So(schema.GetProvider(&p), ShouldBeTrue)
+		So(p.Test(), ShouldEqual, "cf")
+
+		var c Cluster
+		So(schema.GetProvider(&c), ShouldBeFalse)
+	})
+
+	Convey("Incorrect type should raise panic", t, func() {
+		schema := NewSchema()
+		So(func() { schema.GetProvider(1) }, ShouldPanicWith,
+			"destination must be a pointer to an interface")
+		So(func() { schema.GetProvider(new(providerTest)) }, ShouldPanicWith,
+			"destination must be a pointer to an interface")
+	})
+}
+
+type pluginTest bool
+
+func (p *pluginTest) RegisterColumnTags(tags *ColumnTags) { *p = true }
+
+func TestAddCF(t *testing.T) {
+	Convey("AddCF should register plugins", t, func() {
+		p := new(pluginTest)
+		cf := NewCF("test")
+		cf.Provide(Plugin(p))
+		So(bool(*p), ShouldBeFalse)
+
+		schema := NewSchema()
+		schema.AddCF(cf)
+		So(bool(*p), ShouldBeTrue)
+	})
 }

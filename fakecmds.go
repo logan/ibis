@@ -8,6 +8,18 @@ type command interface {
 	Execute(*fakeKeyspace, valueList) (resultSet, error)
 }
 
+type useCommand struct {
+	identifier string
+}
+
+func (cmd *useCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
+	if _, ok := ks.Cluster.Keyspaces[cmd.identifier]; !ok {
+		return nil, errors.New("keyspace doesn't exist: " + cmd.identifier)
+	}
+	ks.Cluster.CurrentKeyspace = cmd.identifier
+	return resultSet{}, nil
+}
+
 type createKeyspaceCommand struct {
 	identifier string
 	strict     bool
@@ -59,12 +71,19 @@ type dropCommand struct {
 func (cmd *dropCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, error) {
 	switch cmd.dropType {
 	case "keyspace":
-		if _, ok := ks.Cluster.Keyspaces[cmd.identifier]; !ok {
+		c := ks.Cluster
+		if cmd.identifier == "system" {
+			return nil, errors.New("can't drop system keyspace")
+		}
+		if c.CurrentKeyspace == cmd.identifier {
+			c.CurrentKeyspace = "system"
+		}
+		if _, ok := c.Keyspaces[cmd.identifier]; !ok {
 			if cmd.strict {
 				return nil, errors.New("keyspace doesn't exist: " + cmd.identifier)
 			}
 		} else {
-			delete(ks.Cluster.Keyspaces, cmd.identifier)
+			delete(c.Keyspaces, cmd.identifier)
 		}
 		return resultSet{}, nil
 	default:
