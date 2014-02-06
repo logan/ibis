@@ -1,0 +1,13 @@
+language: go
+go:
+  - 1.2
+services:
+  - cassandra
+notifications:
+  email: false
+install:
+  - go get -t github.com/logan/ibis
+env:
+  - CLUSTER=""
+  - CLUSTER="localhost"
+script: go test github.com/logan/ibis/... -v -cluster="$CLUSTER"
