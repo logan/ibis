@@ -6,7 +6,7 @@ import "fmt"
 import "reflect"
 import "time"
 
-import "tux21b.org/v1/gocql"
+import "github.com/gocql/gocql"
 
 type TimeUUID gocql.UUID
 
@@ -64,10 +64,10 @@ var columnTypeMap = map[string]string{
 	"float64":                        "double",
 	"github.com/logan/ibis.SeqID":    "varchar",
 	"github.com/logan/ibis.TimeUUID": "timeuuid",
-	"tux21b.org/v1/gocql.UUID":       "timeuuid",
-	"int64":                          "bigint",
-	"string":                         "varchar",
-	"time.Time":                      "timestamp",
+	"github.com/gocql/gocql.UUID":    "timeuuid",
+	"int64":     "bigint",
+	"string":    "varchar",
+	"time.Time": "timestamp",
 }
 
 var (

@@ -2,7 +2,7 @@ package ibis
 
 import "strings"
 
-import "tux21b.org/v1/gocql"
+import "github.com/gocql/gocql"
 
 // CassandraConfig specifies a Cassandra cluster and keyspace to connect to.
 type CassandraConfig struct {

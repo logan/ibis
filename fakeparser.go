@@ -6,7 +6,7 @@ import "strconv"
 import "strings"
 import "unicode"
 
-import "tux21b.org/v1/gocql"
+import "github.com/gocql/gocql"
 
 type statement struct {
 	text string

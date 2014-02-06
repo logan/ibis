@@ -2,7 +2,7 @@ ibis
 ====
 
 Package ibis provides a higher-level interface to the wonderful
-[tux21b.org/v1/gocql](http://tux21b.org/gocql/) package.
+[github.com/gocql/gocql](http://tux21b.org/gocql/) package.
 
 Continue reading to get an overview of how ibis works, or jump straight to the
 [API documentation](http://godoc.org/github.com/logan/ibis).

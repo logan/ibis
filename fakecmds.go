@@ -2,7 +2,7 @@ package ibis
 
 import "errors"
 
-import "tux21b.org/v1/gocql"
+import "github.com/gocql/gocql"
 
 type command interface {
 	Execute(*fakeKeyspace, valueList) (resultSet, error)

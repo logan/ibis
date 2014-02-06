@@ -5,7 +5,7 @@ import "fmt"
 import "reflect"
 import "testing"
 
-import "tux21b.org/v1/gocql"
+import "github.com/gocql/gocql"
 
 import . "github.com/smartystreets/goconvey/convey"
 

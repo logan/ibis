@@ -6,7 +6,7 @@ import "reflect"
 import "testing"
 import "time"
 
-import "tux21b.org/v1/gocql"
+import "github.com/gocql/gocql"
 
 import . "github.com/smartystreets/goconvey/convey"
 
@@ -33,6 +33,9 @@ func TestReflectAndCreate(t *testing.T) {
 		name := expected[0].(string)
 		cqlType := expected[1].(string)
 
+		if idx < 0 || idx >= len(cf.columns) {
+			return fmt.Sprintf("column must be in range 0-%d", len(cf.columns)-1)
+		}
 		if cf.columns[idx].Name != name {
 			return fmt.Sprintf("expected column named %#v, found %#v instead", name,
 				cf.columns[idx].Name)

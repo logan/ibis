@@ -7,8 +7,7 @@ import "reflect"
 import "strings"
 import "time"
 
-import "tux21b.org/v1/gocql"
-
+import "github.com/gocql/gocql"
 import "github.com/logan/ibis"
 
 var Fuzz = 5 * time.Minute

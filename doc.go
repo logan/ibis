@@ -1,5 +1,5 @@
 /*
-Package ibis provides a higher-level interface to the wonderful tux21b.org/v1/gocql package.
+Package ibis provides a higher-level interface to the wonderful github.com/gocql/gocql package.
 
 Schemas
 

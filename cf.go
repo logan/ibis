@@ -5,7 +5,7 @@ import "fmt"
 import "reflect"
 import "strings"
 
-import "tux21b.org/v1/gocql"
+import "github.com/gocql/gocql"
 
 var (
 	ErrNotFound        = errors.New("not found")

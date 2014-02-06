@@ -7,7 +7,7 @@ import "sort"
 import "strings"
 import "time"
 
-import "tux21b.org/v1/gocql"
+import "github.com/gocql/gocql"
 
 type fakeKeyspace struct {
 	Cluster *fakeCluster
