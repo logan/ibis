@@ -70,7 +70,7 @@ func checkEntries(entries []*Entry, expected ...ibis.TimeUUID) (string, bool) {
 
 func TestIndex(t *testing.T) {
 	model := newTestModel(t)
-	//defer model.Close()
+	defer model.Close()
 
 	now := time.Now()
 	uuids := []ibis.TimeUUID{
