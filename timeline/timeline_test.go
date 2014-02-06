@@ -128,9 +128,8 @@ func TestPlugin(t *testing.T) {
 	}
 
 	model := &Model{Rows: ibis.ReflectCF(Row{})}
-	//schema := ibis.ReflectTestSchema(t, model)
-	//defer schema.Cluster.Close()
-	ibis.ReflectTestSchema(t, model)
+	schema := ibis.ReflectTestSchema(t, model)
+	defer schema.Cluster.Close()
 
 	uuid1 := ibis.UUIDFromTime(time.Now())
 	row := &Row{Name: "test", Created: uuid1}
