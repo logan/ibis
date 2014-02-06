@@ -49,6 +49,10 @@ type CF struct {
 	precommitHooks []PrecommitHook
 }
 
+func NewCF(name string, columns ...*Column) *CF {
+	return &CF{name: name, columns: columns}
+}
+
 // CF returns a pointer to the column family it's called on. This is so *CF implements the
 // CFProvider interface.
 func (cf *CF) NewCF() *CF {

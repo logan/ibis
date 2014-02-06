@@ -68,17 +68,12 @@ func TestDiffLiveSchema(t *testing.T) {
 
 	model := &Schema{
 		CFs: Keyspace{
-			"T1": &CF{
-				name: "T1",
-				columns: []*Column{
-					&Column{Name: "A", Type: "varchar"},
-					&Column{Name: "B", Type: "varchar"},
-				},
-			},
+			"T1": NewCF("T1",
+				&Column{Name: "A", Type: "varchar"},
+				&Column{Name: "B", Type: "varchar"}).SetPrimaryKey("A"),
 		},
 		Cluster: cluster,
 	}
-	model.CFs["T1"].SetPrimaryKey("A")
 
 	expected := &SchemaDiff{creations: []*CF{model.CFs["T1"]}}
 	diff, err = DiffLiveSchema(cluster, model)
@@ -95,11 +90,7 @@ func TestDiffLiveSchema(t *testing.T) {
 
 	model.CFs["T1"].columns[1].Type = "blob"
 	model.CFs["T1"].columns = append(model.CFs["T1"].columns, &Column{Name: "C", Type: "bigint"})
-	model.CFs["T2"] = &CF{
-		name:    "T2",
-		columns: []*Column{&Column{Name: "X", Type: "varchar"}},
-	}
-	model.CFs["T2"].SetPrimaryKey("X")
+	model.CFs["T2"] = NewCF("T2", &Column{Name: "X", Type: "varchar"}).SetPrimaryKey("X")
 	expected = &SchemaDiff{
 		creations: []*CF{model.CFs["T2"]},
 		alterations: []tableAlteration{

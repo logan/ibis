@@ -31,8 +31,7 @@ func TestReflectSchema(t *testing.T) {
 	}
 
 	m := &model{}
-	m.Defined = &CF{columns: expectedColumns}
-	m.Defined.SetPrimaryKey("Str")
+	m.Defined = NewCF("Defined", expectedColumns...).SetPrimaryKey("Str")
 	schema := ReflectSchema(m)
 	expectedPrimaryKey := []string{"Str"}
 
