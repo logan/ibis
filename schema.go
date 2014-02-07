@@ -163,7 +163,10 @@ func ReflectSchema(model interface{}) (*Schema, error) {
 					field_value.Set(reflect.New(field.Type.Elem()))
 					provider = field_value.Interface().(CFProvider)
 				}
-				cf := provider.NewCF()
+				cf, err := provider.NewCF()
+				if err != nil {
+					return nil, ChainError(err, "failed to reflect schema")
+				}
 				cf.name = strings.ToLower(field.Name)
 				schema.AddCF(cf)
 			}

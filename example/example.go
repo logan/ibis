@@ -11,9 +11,10 @@ type User struct {
 
 type UserTable struct{ *ibis.CF }
 
-func (t *UserTable) NewCF() *ibis.CF {
-	t.CF, _ = ibis.ReflectCF(User{})
-	return t.CF
+func (t *UserTable) NewCF() (*ibis.CF, error) {
+	var err error
+	t.CF, err = ibis.ReflectCF(User{})
+	return t.CF, err
 }
 
 type Post struct {
@@ -27,9 +28,10 @@ type PostTable struct {
 	*ibis.CF
 }
 
-func (t *PostTable) NewCF() *ibis.CF {
-	t.CF, _ = ibis.ReflectCF(Post{})
-	return t.CF
+func (t *PostTable) NewCF() (*ibis.CF, error) {
+	var err error
+	t.CF, err = ibis.ReflectCF(Post{})
+	return t.CF, err
 }
 
 type Model struct {
@@ -44,7 +46,10 @@ func NewModel(cluster ibis.Cluster) (*Model, error) {
 	}
 
 	model := &Model{}
-	schema, _ := ibis.ReflectSchema(model)
+	schema, err := ibis.ReflectSchema(model)
+	if err != nil {
+		return nil, err
+	}
 	schema.Provide(idgen)
 	schema.Cluster = cluster
 

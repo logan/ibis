@@ -14,9 +14,10 @@ type table struct {
 	*CF
 }
 
-func (t *table) NewCF() *CF {
-	t.CF, _ = ReflectCF(row{})
-	return t.cf
+func (t *table) NewCF() (*CF, error) {
+	var err error
+	t.CF, err = ReflectCF(row{})
+	return t.cf, err
 }
 
 func TestSchemaMiscellanea(t *testing.T) {

@@ -36,10 +36,11 @@ type IndexTable struct {
 	*ibis.CF
 }
 
-func (t *IndexTable) NewCF() *ibis.CF {
-	t.CF, _ = ibis.ReflectCF(Entry{})
+func (t *IndexTable) NewCF() (*ibis.CF, error) {
+	var err error
+	t.CF, err = ibis.ReflectCF(Entry{})
 	t.Provide(IndexProvider(t))
-	return t.CF
+	return t.CF, err
 }
 
 func (t *IndexTable) Index(keys ...string) *Index {
@@ -196,12 +197,13 @@ type TimelinePlugin struct {
 	precommitters map[string]*timelinePrecommitter
 }
 
-func (plugin *TimelinePlugin) NewCF() *ibis.CF {
+func (plugin *TimelinePlugin) NewCF() (*ibis.CF, error) {
+	var err error
 	plugin.IndexTable = new(IndexTable)
-	cf := plugin.IndexTable.NewCF()
+	cf, err := plugin.IndexTable.NewCF()
 	cf.Provide(ibis.SchemaPlugin(plugin))
 	cf.Provide(IndexProvider(plugin))
-	return cf
+	return cf, err
 }
 
 func (plugin *TimelinePlugin) RegisterColumnTags(tags *ibis.ColumnTags) {

@@ -258,9 +258,10 @@ type marshalTestTable struct {
 	*CF
 }
 
-func (t *marshalTestTable) NewCF() *CF {
-	t.CF, _ = ReflectCF(marshalTestRow{})
-	return t.CF
+func (t *marshalTestTable) NewCF() (*CF, error) {
+	var err error
+	t.CF, err = ReflectCF(marshalTestRow{})
+	return t.CF, err
 }
 
 func TestRowReflection(t *testing.T) {

@@ -19,12 +19,12 @@ type UnmarshalHook func(MarshaledMap) error
 // CFProvider when specifying a schema struct for ReflectSchema(). Exported fields that implement
 // this interface will be included in the resulting schema.
 type CFProvider interface {
-	NewCF() *CF
+	NewCF() (*CF, error)
 }
 
 type cfProviderFunc func() *CF
 
-func (p cfProviderFunc) NewCF() *CF { return p() }
+func (p cfProviderFunc) NewCF() (*CF, error) { return p(), nil }
 
 // CFProviderFunc wraps a function as a CFProvider.
 func CFProviderFunc(provider func() *CF) CFProvider { return cfProviderFunc(provider) }
@@ -53,8 +53,8 @@ func NewCF(name string, columns ...Column) *CF {
 
 // CF returns a pointer to the column family it's called on. This is so *CF implements the
 // CFProvider interface.
-func (cf *CF) NewCF() *CF {
-	return cf
+func (cf *CF) NewCF() (*CF, error) {
+	return cf, nil
 }
 
 func (cf *CF) Schema() *Schema { return cf.schema }
