@@ -144,64 +144,6 @@ func (rv *MarshalledValue) String() string {
 	return fmt.Sprintf("%+v%s", rv.Bytes, dirty)
 }
 
-// MarshalledMap is a map of column names to marshalled values.
-type MarshalledMap map[string]*MarshalledValue
-
-// InterfacesFor returns the marshalled values associated with the given keys as bare interfaces.
-// They are returned in order corresponding to that of the given keys.
-func (rv *MarshalledMap) InterfacesFor(keys ...string) []interface{} {
-	result := make([]interface{}, len(keys))
-	for i, k := range keys {
-		result[i] = (*rv)[k]
-	}
-	return result
-}
-
-// PointersTo associates new marshalled values in the map and returns pointers to them to be filled
-// in by methods like Query.Scan. The pointers are returned as a list of interfaces in order
-// corresponding to that of the given keys.
-func (rv *MarshalledMap) PointersTo(keys ...string) []interface{} {
-	result := make([]interface{}, len(keys))
-	for i, k := range keys {
-		(*rv)[k] = &MarshalledValue{}
-		result[i] = (*rv)[k]
-	}
-	return result
-}
-
-// ValuesOf returns the marshalled values associated with the given keys, in the order given by
-// keys. Keys with no association will have a corresponding nil value returned.
-func (rv *MarshalledMap) ValuesOf(keys ...string) []*MarshalledValue {
-	result := make([]*MarshalledValue, len(keys))
-	for i, k := range keys {
-		result[i] = (*rv)[k]
-	}
-	return result
-}
-
-// Keys returns the keys in the map that have an associated marshalled value, in no particular
-// order.
-func (rv *MarshalledMap) Keys() []string {
-	keys := make([]string, 0, len(*rv))
-	for k, v := range *rv {
-		if v != nil {
-			keys = append(keys, k)
-		}
-	}
-	return keys
-}
-
-// DirtyKeys returns the keys in the map that are associated with a dirty marshalled value.
-func (rv *MarshalledMap) DirtyKeys() []string {
-	dirties := make([]string, 0, len(*rv))
-	for k, v := range *rv {
-		if v != nil && v.Dirty() {
-			dirties = append(dirties, k)
-		}
-	}
-	return dirties
-}
-
 func (v *MarshalledValue) cmp(w *MarshalledValue) (int, error) {
 	if v == nil {
 		if w == nil {
@@ -293,9 +235,66 @@ func (v *MarshalledValue) cmp(w *MarshalledValue) (int, error) {
 	}
 }
 
+// MarshalledMap is a map of column names to marshalled values.
+type MarshalledMap map[string]*MarshalledValue
+
+// InterfacesFor returns the marshalled values associated with the given keys as bare interfaces.
+// They are returned in order corresponding to that of the given keys.
+func (rv *MarshalledMap) InterfacesFor(keys ...string) []interface{} {
+	result := make([]interface{}, len(keys))
+	for i, k := range keys {
+		result[i] = (*rv)[k]
+	}
+	return result
+}
+
+// PointersTo associates new marshalled values in the map and returns pointers to them to be filled
+// in by methods like Query.Scan. The pointers are returned as a list of interfaces in order
+// corresponding to that of the given keys.
+func (rv *MarshalledMap) PointersTo(keys ...string) []interface{} {
+	result := make([]interface{}, len(keys))
+	for i, k := range keys {
+		(*rv)[k] = &MarshalledValue{}
+		result[i] = (*rv)[k]
+	}
+	return result
+}
+
+// ValuesOf returns the marshalled values associated with the given keys, in the order given by
+// keys. Keys with no association will have a corresponding nil value returned.
+func (rv *MarshalledMap) ValuesOf(keys ...string) []*MarshalledValue {
+	result := make([]*MarshalledValue, len(keys))
+	for i, k := range keys {
+		result[i] = (*rv)[k]
+	}
+	return result
+}
+
+// Keys returns the keys in the map that have an associated marshalled value, in no particular
+// order.
+func (rv *MarshalledMap) Keys() []string {
+	keys := make([]string, 0, len(*rv))
+	for k, v := range *rv {
+		if v != nil {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// DirtyKeys returns the keys in the map that are associated with a dirty marshalled value.
+func (rv *MarshalledMap) DirtyKeys() []string {
+	dirties := make([]string, 0, len(*rv))
+	for k, v := range *rv {
+		if v != nil && v.Dirty() {
+			dirties = append(dirties, k)
+		}
+	}
+	return dirties
+}
+
 // A Row is capable of pointing to its column family and marshalling/unmarshalling itself.
 type Row interface {
-	CF() *CF
 	Marshal(MarshalledMap) error
 	Unmarshal(MarshalledMap) error
 }
@@ -318,16 +317,15 @@ func (s *rowReflector) reflectedRow(x interface{}) (Row, error) {
 	if !xType.ConvertibleTo(s.rowType) {
 		return nil, ErrInvalidRowType
 	}
+	if xValue.IsNil() {
+		return nil, ErrInvalidRowType
+	}
 	return &reflectedRow{cf: s.cf, value: xValue.Convert(s.rowType).Elem()}, nil
 }
 
 type reflectedRow struct {
 	cf    *CF
 	value reflect.Value
-}
-
-func (rr *reflectedRow) CF() *CF {
-	return rr.cf
 }
 
 func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
@@ -340,7 +338,7 @@ func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
 		if fieldval.IsValid() {
 			if seqid, ok := fieldval.Interface().(SeqID); ok && seqid == "" {
 				var gen SeqIDGenerator
-				if rr.cf.Schema().GetProvider(&gen) {
+				if rr.cf.Schema() != nil && rr.cf.Schema().GetProvider(&gen) {
 					if seqid, err = gen.NewSeqID(); err != nil {
 						return err
 					}
