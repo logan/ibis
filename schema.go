@@ -93,11 +93,14 @@ func (s *Schema) GetProvider(dest interface{}) bool {
 func (s *Schema) DialCassandra(config CassandraConfig) error {
 	cluster, err := DialCassandra(config)
 	if err != nil {
-		return err
+		return WrapError("connection to cassandra failed", err)
 	}
 	s.Cluster = cluster
 	s.SchemaUpdates, err = DiffLiveSchema(s.Cluster, s)
-	return err
+	if err != nil {
+		return WrapError("inspection of live schema failed", err)
+	}
+	return nil
 }
 
 // RequiresUpdates returns true if this schema differs from the existing column families in the

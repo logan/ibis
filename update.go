@@ -38,14 +38,14 @@ func (d *SchemaDiff) Apply(cluster Cluster) error {
 		cql := t.CreateStatement()
 		cql.Cluster(cluster)
 		if err := cql.Query().Exec(); err != nil {
-			return err
+			return WrapError("column family creation failed", err)
 		}
 	}
 	for _, a := range d.alterations {
 		for _, s := range a.AlterStatements() {
 			s.Cluster(cluster)
 			if err := s.Query().Exec(); err != nil {
-				return err
+				return WrapError("column alteration failed", err)
 			}
 		}
 	}

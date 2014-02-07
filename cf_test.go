@@ -223,7 +223,13 @@ func TestPrecommitHooks(t *testing.T) {
 	})
 
 	Convey("Precommit error should interrupt commit and percolate back to caller", t, func() {
-		So(src.Commit(&rowType{"fail"}), ShouldEqual, failErr)
+		err := src.Commit(&rowType{"fail"})
+		So(err, ShouldNotBeNil)
+		wrapped, ok := err.(WrappedError)
+		So(ok, ShouldBeTrue)
+		wrapped, ok = wrapped.Unwrap().(WrappedError)
+		So(ok, ShouldBeTrue)
+		So(wrapped.Unwrap(), ShouldEqual, failErr)
 	})
 }
 

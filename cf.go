@@ -1,20 +1,10 @@
 package ibis
 
-import "errors"
 import "fmt"
 import "reflect"
 import "strings"
 
 import "github.com/gocql/gocql"
-
-var (
-	ErrNotFound        = errors.New("not found")
-	ErrAlreadyExists   = errors.New("already exists")
-	ErrTableNotBound   = errors.New("table not connected to a cluster")
-	ErrNothingToCommit = errors.New("nothing to commit")
-	ErrInvalidKey      = errors.New("invalid key")
-	ErrInvalidRowType  = errors.New("row doesn't match schema")
-)
 
 // A type of function that produces CQL statements to execute before committing data.
 type PrecommitHook func(interface{}, MarshaledMap) ([]CQL, error)
@@ -284,7 +274,7 @@ func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 	mmap := make(MarshaledMap)
 	if !qiter.Scan(mmap.PointersTo(colnames...)...) {
 		if err := qiter.Close(); err != nil {
-			return err
+			return WrapError("scan failed", err)
 		}
 		return ErrNotFound
 	}
@@ -346,10 +336,10 @@ func (cf *CF) MakeCommitCAS(row interface{}) (CQL, error) {
 func (cf *CF) applyPrecommitHooks(row interface{}, mmap MarshaledMap) ([]CQL, error) {
 	total := make([]CQL, 0)
 	if cf.precommitHooks != nil {
-		for _, hook := range cf.precommitHooks {
+		for i, hook := range cf.precommitHooks {
 			cqls, err := hook(row, mmap)
 			if err != nil {
-				return nil, err
+				return nil, WrapError(fmt.Sprintf("precommit hook #%d failed", i), err)
 			}
 			total = append(total, cqls...)
 		}
@@ -410,18 +400,18 @@ func (cf *CF) generateCommit(mmap MarshaledMap, cas bool) (cql CQL, ok bool) {
 func (cf *CF) commit(row interface{}, cas bool) error {
 	mmap, err := cf.marshal(row)
 	if err != nil {
-		return err
+		return WrapError("marshal failed", err)
 	}
 
 	// Generate CQL from precommit hooks and execute it in a batch.
 	// TODO: Include commit in the same batch.
 	cqls, err := cf.applyPrecommitHooks(row, mmap)
 	if err != nil {
-		return err
+		return WrapError("precommit setup failed", err)
 	}
 	if len(cqls) > 0 {
 		if err := cf.schema.Cluster.Query(cqls...).Exec(); err != nil {
-			return err
+			return WrapError("precommit failed", err)
 		}
 	}
 
@@ -447,13 +437,13 @@ func (cf *CF) commit(row interface{}, cas bool) error {
 		if applied := qiter.ScanCAS(pointers...); !applied {
 			err := qiter.Close()
 			if err == nil {
-				err = ErrAlreadyExists
+				return ErrAlreadyExists
 			}
-			return err
+			return WrapError("CAS commit failed", err)
 		}
 	} else {
 		if err := qiter.Exec(); err != nil {
-			return err
+			return WrapError("commit failed", err)
 		}
 	}
 
@@ -470,12 +460,18 @@ func (cf *CF) marshal(src interface{}) (MarshaledMap, error) {
 		var err error
 		row, err = cf.rowReflector.reflectedRow(src)
 		if err != nil {
-			return nil, err
+			if err == ErrInvalidRowType {
+				return nil, err
+			}
+			return nil, WrapError("row marshal failed", err)
 		}
 	}
 	mmap := make(MarshaledMap)
 	if err := row.Marshal(mmap); err != nil {
-		return nil, err
+		if err == ErrInvalidRowType {
+			return nil, err
+		}
+		return nil, WrapError("row marshal failed", err)
 	}
 	return mmap, nil
 }
@@ -489,7 +485,10 @@ func (cf *CF) unmarshal(dest interface{}, mmap MarshaledMap) error {
 		var err error
 		row, err = cf.rowReflector.reflectedRow(dest)
 		if err != nil {
-			return err
+			if err == ErrInvalidRowType {
+				return err
+			}
+			return WrapError("row unmarshal failed", err)
 		}
 	}
 	return row.Unmarshal(mmap)

@@ -1,8 +1,6 @@
 package ibis
 
-import "errors"
 import "flag"
-import "fmt"
 import "strconv"
 import "strings"
 import "testing"
@@ -56,14 +54,6 @@ func NewTestConn(t *testing.T) Cluster {
 
 	return &testConn{c}
 }
-
-type wrapError struct {
-	err     error
-	wrapped error
-}
-
-func WrapError(msg string, err error) error { return wrapError{errors.New(msg), err} }
-func (wrap wrapError) Error() string        { return fmt.Sprintf("%s: %s", wrap.err, wrap.wrapped) }
 
 func initKeyspace(config CassandraConfig) error {
 	c, err := connect(config)
