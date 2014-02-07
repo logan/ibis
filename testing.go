@@ -5,6 +5,8 @@ import "strconv"
 import "strings"
 import "testing"
 
+import . "github.com/smartystreets/goconvey/convey"
+
 var (
 	flagCluster  = flag.String("cluster", "", "cassandra nodes given as comma-separated host:port pairs")
 	flagKeyspace = flag.String("keyspace", "creative_test", "name of throwaway keyspace for testing")
@@ -67,7 +69,7 @@ func initKeyspace(config CassandraConfig) error {
 	cql.Cluster(c)
 	qiter := cql.Query()
 	if err := qiter.Exec(); err != nil {
-		return WrapError("drop keyspace failed:", err)
+		return ChainError(err, "drop keyspace failed")
 	}
 
 	b.Clear()
@@ -76,7 +78,7 @@ func initKeyspace(config CassandraConfig) error {
 	cql = b.CQL()
 	cql.Cluster(c)
 	if err := cql.Query().Exec(); err != nil {
-		return WrapError("create keyspace failed:", err)
+		return ChainError(err, "create keyspace failed")
 	}
 
 	return nil
@@ -103,4 +105,11 @@ func ReflectTestSchema(t *testing.T, model interface{}) *Schema {
 		t.Fatal(err)
 	}
 	return schema
+}
+
+func shouldBeError(actual interface{}, expected ...interface{}) string {
+	if msg := ShouldHaveSameTypeAs(actual, &Error{}); msg != "" {
+		return msg
+	}
+	return ShouldEqual(string(actual.(*Error).Key), string(expected[0].(ErrorKey)))
 }

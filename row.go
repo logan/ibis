@@ -322,14 +322,14 @@ func (s *rowReflector) addMarshalPlugin(field reflect.StructField) {
 func (s *rowReflector) reflectedRow(x interface{}) (Row, error) {
 	xType := reflect.TypeOf(x)
 	if xType == nil {
-		return nil, ErrInvalidRowType
+		return nil, ErrInvalidRowType.New()
 	}
 	xValue := reflect.ValueOf(x)
 	if !xType.ConvertibleTo(s.rowType) {
-		return nil, ErrInvalidRowType
+		return nil, ErrInvalidRowType.New()
 	}
 	if xValue.IsNil() {
-		return nil, ErrInvalidRowType
+		return nil, ErrInvalidRowType.New()
 	}
 	value := xValue.Convert(s.rowType).Elem()
 
@@ -402,7 +402,7 @@ func (rr *reflectedRow) Unmarshal(mmap MarshaledMap) error {
 		if v.Bytes != nil {
 			target := rr.value.FieldByName(k)
 			if !target.IsValid() {
-				return ErrInvalidRowType
+				return ErrInvalidRowType.New()
 			}
 			if err := gocql.Unmarshal(v.TypeInfo, v.Bytes, target.Addr().Interface()); err != nil {
 				return err

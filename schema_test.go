@@ -94,9 +94,9 @@ func TestReflectSchema(t *testing.T) {
 
 	Convey("Should panic on invalid argument", t, func() {
 		_, err := ReflectSchema(8)
-		So(err, ShouldEqual, ErrInvalidSchemaType)
+		So(err, shouldBeError, ErrInvalidSchemaType)
 		_, err = ReflectSchema(model{})
-		So(err, ShouldEqual, ErrInvalidSchemaType)
+		So(err, shouldBeError, ErrInvalidSchemaType)
 	})
 }
 

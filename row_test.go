@@ -278,21 +278,21 @@ func TestRowReflection(t *testing.T) {
 	Convey("Invalid row types should cause errors to be returned", t, func() {
 		reflector := newRowReflector(cf, 1)
 		_, err := reflector.reflectedRow("1")
-		So(err, ShouldEqual, ErrInvalidRowType)
+		So(err, shouldBeError, ErrInvalidRowType)
 		_, err = reflector.reflectedRow(nil)
-		So(err, ShouldEqual, ErrInvalidRowType)
+		So(err, shouldBeError, ErrInvalidRowType)
 
 		reflector = newRowReflector(cf, item{})
 		_, err = reflector.reflectedRow("1")
-		So(err, ShouldEqual, ErrInvalidRowType)
+		So(err, shouldBeError, ErrInvalidRowType)
 		_, err = reflector.reflectedRow(nil)
-		So(err, ShouldEqual, ErrInvalidRowType)
+		So(err, shouldBeError, ErrInvalidRowType)
 
 		_, err = reflector.reflectedRow(item{})
-		So(err, ShouldEqual, ErrInvalidRowType)
+		So(err, shouldBeError, ErrInvalidRowType)
 
 		_, err = reflector.reflectedRow((*item)(nil))
-		So(err, ShouldEqual, ErrInvalidRowType)
+		So(err, shouldBeError, ErrInvalidRowType)
 	})
 
 	Convey("Magic adaptation to Row interface should occur", t, func() {

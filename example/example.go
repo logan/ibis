@@ -12,7 +12,7 @@ type User struct {
 type UserTable struct{ *ibis.CF }
 
 func (t *UserTable) NewCF() *ibis.CF {
-	t.CF = ibis.ReflectCF(User{})
+	t.CF, _ = ibis.ReflectCF(User{})
 	return t.CF
 }
 
@@ -28,7 +28,7 @@ type PostTable struct {
 }
 
 func (t *PostTable) NewCF() *ibis.CF {
-	t.CF = ibis.ReflectCF(Post{})
+	t.CF, _ = ibis.ReflectCF(Post{})
 	return t.CF
 }
 
@@ -44,7 +44,7 @@ func NewModel(cluster ibis.Cluster) (*Model, error) {
 	}
 
 	model := &Model{}
-	schema := ibis.ReflectSchema(model)
+	schema, _ := ibis.ReflectSchema(model)
 	schema.Provide(idgen)
 	schema.Cluster = cluster
 
@@ -79,7 +79,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	model, err := NewModel(ibis.FakeCassandra())
+	model, err := NewModel(ibis.FakeCassandra("test"))
 	if err != nil {
 		fail(err)
 	}

@@ -1,6 +1,5 @@
 package ibis
 
-import "errors"
 import "fmt"
 import "reflect"
 import "testing"
@@ -48,7 +47,7 @@ func TestReflectAndCreate(t *testing.T) {
 	}
 
 	Convey("Passing a non-struct type to fillFromRowType should panic", t, func() {
-		So(cf.fillFromRowType(reflect.TypeOf(8)), ShouldEqual, ErrInvalidRowType)
+		So(cf.fillFromRowType(reflect.TypeOf(8)), shouldBeError, ErrInvalidRowType)
 	})
 
 	Convey("Checking reflected schema", t, func() {
@@ -97,7 +96,7 @@ func TestCrud(t *testing.T) {
 	Convey("CommitCAS should work exactly once for a given key (\"P1\", 0)", t, func() {
 		crud := crudRow{Partition: "P1", Cluster: 0, Value: "P1-0"}
 		So(cf.CommitCAS(&crud), ShouldBeNil)
-		So(cf.CommitCAS(&crud), ShouldEqual, ErrAlreadyExists)
+		So(cf.CommitCAS(&crud), shouldBeError, ErrAlreadyExists)
 	})
 
 	Convey("LoadByKey should retrieve (\"P1\", 0)", t, func() {
@@ -110,7 +109,7 @@ func TestCrud(t *testing.T) {
 
 	Convey("LoadByKey should return ErrNotFound for (\"P1\", 1)", t, func() {
 		var crud crudRow
-		So(cf.LoadByKey(&crud, "P1", 1), ShouldEqual, ErrNotFound)
+		So(cf.LoadByKey(&crud, "P1", 1), shouldBeError, ErrNotFound)
 	})
 
 	Convey("LoadByKey should retrieve (\"P1\", 1) once it's committed", t, func() {
@@ -125,7 +124,7 @@ func TestCrud(t *testing.T) {
 
 	Convey("Commit should update an existing row", t, func() {
 		crud := crudRow{Partition: "P1", Cluster: 1, Value: "P1-1 modified"}
-		So(cf.CommitCAS(&crud), ShouldEqual, ErrAlreadyExists)
+		So(cf.CommitCAS(&crud), shouldBeError, ErrAlreadyExists)
 		So(cf.Commit(&crud), ShouldBeNil)
 		var retr crudRow
 		So(cf.LoadByKey(&retr, "P1", 1), ShouldBeNil)
@@ -220,12 +219,12 @@ func TestPrecommitHooks(t *testing.T) {
 
 	src := model.Src
 	dest := model.Dest
-	failErr := errors.New("failErr")
+	failErr := ErrorKey("failErr")
 
 	src.Precommit(func(row interface{}, mmap MarshaledMap) ([]CQL, error) {
 		id := row.(*rowType).ID
 		if id == "fail" {
-			return nil, failErr
+			return nil, failErr.New()
 		}
 		cql, err := dest.MakeCommit(&rowType{id + "-mirror"})
 		if err != nil {
@@ -244,11 +243,7 @@ func TestPrecommitHooks(t *testing.T) {
 	Convey("Precommit error should interrupt commit and percolate back to caller", t, func() {
 		err := src.Commit(&rowType{"fail"})
 		So(err, ShouldNotBeNil)
-		wrapped, ok := err.(WrappedError)
-		So(ok, ShouldBeTrue)
-		wrapped, ok = wrapped.Unwrap().(WrappedError)
-		So(ok, ShouldBeTrue)
-		So(wrapped.Unwrap(), ShouldEqual, failErr)
+		So(err, shouldBeError, failErr)
 	})
 }
 
@@ -270,21 +265,21 @@ func TestMiscCFErrors(t *testing.T) {
 
 	Convey("Operations on unbound CF should return false, ErrTableNotBound", t, func() {
 		_, err := unboundCf.Exists()
-		So(err, ShouldEqual, ErrTableNotBound)
-		So(unboundCf.Commit(nil), ShouldEqual, ErrTableNotBound)
-		So(unboundCf.CommitCAS(nil), ShouldEqual, ErrTableNotBound)
+		So(err, shouldBeError, ErrTableNotBound)
+		So(unboundCf.Commit(nil), shouldBeError, ErrTableNotBound)
+		So(unboundCf.CommitCAS(nil), shouldBeError, ErrTableNotBound)
 	})
 
 	Convey("LoadByKey errors", t, func() {
 		Convey("on unbound CF should return ErrTableNotBound", func() {
-			So(unboundCf.LoadByKey(nil), ShouldEqual, ErrTableNotBound)
+			So(unboundCf.LoadByKey(nil), shouldBeError, ErrTableNotBound)
 		})
 		Convey("on mismatched key length should return ErrInvalidKey", func() {
-			So(cf.LoadByKey(nil), ShouldEqual, ErrInvalidKey)
+			So(cf.LoadByKey(nil), shouldBeError, ErrInvalidKey)
 		})
 		Convey("on invalid dest should return ErrInvalidRowType", func() {
 			So(cf.Commit(&r{"test"}), ShouldBeNil)
-			So(cf.LoadByKey(nil, "test"), ShouldEqual, ErrInvalidRowType)
+			So(cf.LoadByKey(nil, "test"), shouldBeError, ErrInvalidRowType)
 		})
 	})
 

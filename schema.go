@@ -93,12 +93,12 @@ func (s *Schema) GetProvider(dest interface{}) bool {
 func (s *Schema) DialCassandra(config CassandraConfig) error {
 	cluster, err := DialCassandra(config)
 	if err != nil {
-		return WrapError("connection to cassandra failed", err)
+		return ChainError(err, "connection to cassandra failed")
 	}
 	s.Cluster = cluster
 	s.SchemaUpdates, err = DiffLiveSchema(s.Cluster, s)
 	if err != nil {
-		return WrapError("inspection of live schema failed", err)
+		return ChainError(err, "inspection of live schema failed")
 	}
 	return nil
 }
@@ -140,12 +140,12 @@ func (s *Schema) IsBound() bool {
 func ReflectSchema(model interface{}) (*Schema, error) {
 	ptr_type := reflect.TypeOf(model)
 	if ptr_type.Kind() != reflect.Ptr {
-		return nil, ErrInvalidSchemaType
+		return nil, ErrInvalidSchemaType.New()
 	}
 	model_value := reflect.Indirect(reflect.ValueOf(model))
 	model_type := model_value.Type()
 	if model_type.Kind() != reflect.Struct {
-		return nil, ErrInvalidSchemaType
+		return nil, ErrInvalidSchemaType.New()
 	}
 	providerType := reflect.TypeOf((*CFProvider)(nil)).Elem()
 	schema := NewSchema()

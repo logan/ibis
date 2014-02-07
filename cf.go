@@ -212,7 +212,7 @@ func (cf *CF) IsBound() bool {
 // column family (see the Key function).
 func (cf *CF) Exists(key ...interface{}) (bool, error) {
 	if !cf.IsBound() {
-		return false, ErrTableNotBound
+		return false, ErrTableNotBound.New()
 	}
 	sel := Select("COUNT(*)").From(cf)
 	for i, k := range cf.primaryKey {
@@ -236,10 +236,10 @@ func (cf *CF) Exists(key ...interface{}) (bool, error) {
 // returned.
 func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 	if !cf.IsBound() {
-		return ErrTableNotBound
+		return ErrTableNotBound.New()
 	}
 	if len(key) != len(cf.primaryKey) {
-		return ErrInvalidKey
+		return ErrInvalidKey.New()
 	}
 
 	colnames := make([]string, len(cf.columns))
@@ -255,9 +255,9 @@ func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 	mmap := make(MarshaledMap)
 	if !qiter.Scan(mmap.PointersTo(colnames...)...) {
 		if err := qiter.Close(); err != nil {
-			return WrapError("scan failed", err)
+			return ChainError(err, "scan failed")
 		}
-		return ErrNotFound
+		return ErrNotFound.New()
 	}
 	return cf.unmarshal(dest, mmap)
 }
@@ -270,7 +270,7 @@ func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 // was reflected.
 func (cf *CF) CommitCAS(row interface{}) error {
 	if !cf.IsBound() {
-		return ErrTableNotBound
+		return ErrTableNotBound.New()
 	}
 	// TODO: handle pk changes
 	return cf.commit(row, true)
@@ -284,7 +284,7 @@ func (cf *CF) CommitCAS(row interface{}) error {
 // was reflected.
 func (cf *CF) Commit(row interface{}) error {
 	if !cf.IsBound() {
-		return ErrTableNotBound
+		return ErrTableNotBound.New()
 	}
 	// TODO: handle pk changes
 	return cf.commit(row, false)
@@ -299,7 +299,7 @@ func (cf *CF) MakeCommit(row interface{}) (CQL, error) {
 	}
 	cql, ok := cf.generateCommit(mmap, false)
 	if !ok {
-		return CQL{}, ErrNothingToCommit
+		return CQL{}, ErrNothingToCommit.New()
 	}
 	return cql, nil
 }
@@ -320,7 +320,7 @@ func (cf *CF) applyPrecommitHooks(row interface{}, mmap MarshaledMap) ([]CQL, er
 		for i, hook := range cf.precommitHooks {
 			cqls, err := hook(row, mmap)
 			if err != nil {
-				return nil, WrapError(fmt.Sprintf("precommit hook #%d failed", i), err)
+				return nil, ChainError(err, fmt.Sprintf("precommit hook #%d failed", i))
 			}
 			total = append(total, cqls...)
 		}
@@ -381,18 +381,18 @@ func (cf *CF) generateCommit(mmap MarshaledMap, cas bool) (cql CQL, ok bool) {
 func (cf *CF) commit(row interface{}, cas bool) error {
 	mmap, err := cf.marshal(row)
 	if err != nil {
-		return WrapError("marshal failed", err)
+		return ChainError(err, "marshal failed")
 	}
 
 	// Generate CQL from precommit hooks and execute it in a batch.
 	// TODO: Include commit in the same batch.
 	cqls, err := cf.applyPrecommitHooks(row, mmap)
 	if err != nil {
-		return WrapError("precommit setup failed", err)
+		return ChainError(err, "precommit setup failed")
 	}
 	if len(cqls) > 0 {
 		if err := cf.schema.Cluster.Query(cqls...).Exec(); err != nil {
-			return WrapError("precommit failed", err)
+			return ChainError(err, "precommit failed")
 		}
 	}
 
@@ -418,13 +418,13 @@ func (cf *CF) commit(row interface{}, cas bool) error {
 		if applied := qiter.ScanCAS(pointers...); !applied {
 			err := qiter.Close()
 			if err == nil {
-				return ErrAlreadyExists
+				return ErrAlreadyExists.New()
 			}
-			return WrapError("CAS commit failed", err)
+			return ChainError(err, "CAS commit failed")
 		}
 	} else {
 		if err := qiter.Exec(); err != nil {
-			return WrapError("commit failed", err)
+			return ChainError(err, "commit failed")
 		}
 	}
 
@@ -436,28 +436,22 @@ func (cf *CF) marshal(src interface{}) (MarshaledMap, error) {
 	row, ok := src.(Row)
 	if !ok {
 		if cf.rowReflector == nil {
-			return nil, ErrInvalidRowType
+			return nil, ErrInvalidRowType.New()
 		}
 		var err error
 		row, err = cf.rowReflector.reflectedRow(src)
 		if err != nil {
-			if err == ErrInvalidRowType {
-				return nil, err
-			}
-			return nil, WrapError("row marshal failed", err)
+			return nil, ChainError(err, "row marshal failed")
 		}
 	}
 	mmap := make(MarshaledMap)
 	if err := row.Marshal(mmap); err != nil {
-		if err == ErrInvalidRowType {
-			return nil, err
-		}
-		return nil, WrapError("row marshal failed", err)
+		return nil, ChainError(err, "row marshal failed")
 	}
 	if cf.marshalHooks != nil {
 		for i, hook := range cf.marshalHooks {
 			if err := hook(mmap); err != nil {
-				return nil, WrapError(fmt.Sprintf("marshal hook %d failed", i), err)
+				return nil, ChainError(err, fmt.Sprintf("marshal hook %d failed", i))
 			}
 		}
 	}
@@ -468,21 +462,18 @@ func (cf *CF) unmarshal(dest interface{}, mmap MarshaledMap) error {
 	row, ok := dest.(Row)
 	if !ok {
 		if cf.rowReflector == nil {
-			return ErrInvalidRowType
+			return ErrInvalidRowType.New()
 		}
 		var err error
 		row, err = cf.rowReflector.reflectedRow(dest)
 		if err != nil {
-			if err == ErrInvalidRowType {
-				return err
-			}
-			return WrapError("row unmarshal failed", err)
+			return ChainError(err, "row unmarshal failed")
 		}
 	}
 	if cf.unmarshalHooks != nil {
 		for i, hook := range cf.unmarshalHooks {
 			if err := hook(mmap); err != nil {
-				return WrapError(fmt.Sprintf("unmarshal hook %d failed", i), err)
+				return ChainError(err, fmt.Sprintf("unmarshal hook %d failed", i))
 			}
 		}
 	}
@@ -550,7 +541,7 @@ func ReflectCF(template interface{}) (*CF, error) {
 
 func (cf *CF) fillFromRowType(row_type reflect.Type) error {
 	if row_type.Kind() != reflect.Struct {
-		return ErrInvalidRowType
+		return ErrInvalidRowType.New()
 	}
 	if cf.columns == nil {
 		cf.columns = make([]Column, 0)
