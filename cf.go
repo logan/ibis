@@ -9,6 +9,12 @@ import "github.com/gocql/gocql"
 // A type of function that produces CQL statements to execute before committing data.
 type PrecommitHook func(interface{}, MarshaledMap) ([]CQL, error)
 
+// A MarshalHook is invoked just after a row is marshalled, prior to commit.
+type MarshalHook func(MarshaledMap) error
+
+// An UnmarshalHook is invoked just before a row is unmarshalled, after a commit, load, or scan.
+type UnmarshalHook func(MarshaledMap) error
+
 // CFProvider is an interface for producing and configuring a column family definition. Use
 // CFProvider when specifying a schema struct for ReflectSchema(). Exported fields that implement
 // this interface will be included in the resulting schema.
@@ -37,6 +43,8 @@ type CF struct {
 	*rowReflector
 	provisions     []reflect.Value
 	precommitHooks []PrecommitHook
+	marshalHooks   []MarshalHook
+	unmarshalHooks []UnmarshalHook
 }
 
 func NewCF(name string, columns ...Column) *CF {
@@ -109,6 +117,22 @@ func (cf *CF) Precommit(hook PrecommitHook) *CF {
 	return cf
 }
 
+// OnMarshal adds a hook to the column family's list of marshal hooks.
+func (cf *CF) OnMarshal(hook MarshalHook) *CF {
+	if cf.marshalHooks == nil {
+		cf.marshalHooks = append(cf.marshalHooks, hook)
+	}
+	return cf
+}
+
+// OnUnmarshal adds a hook to the column family's list of unmarshal hooks.
+func (cf *CF) OnUnmarshal(hook UnmarshalHook) *CF {
+	if cf.unmarshalHooks == nil {
+		cf.unmarshalHooks = append(cf.unmarshalHooks, hook)
+	}
+	return cf
+}
+
 // CreateStatement returns the CQL statement that would create this table.
 func (cf *CF) CreateStatement() CQL {
 	var b CQLBuilder
@@ -134,50 +158,6 @@ type Column struct {
 	Type     string // The cassandra type of the column ("varchar", "bigint", etc.).
 	typeInfo *gocql.TypeInfo
 	tag      reflect.StructTag
-}
-
-func (cf *CF) fillFromRowType(row_type reflect.Type) error {
-	if row_type.Kind() != reflect.Struct {
-		return ErrInvalidRowType
-	}
-	cf.columns = columnsFromStructType(row_type)
-	return nil
-}
-
-func columnsFromStructType(struct_type reflect.Type) []Column {
-	cols := make([]Column, 0, struct_type.NumField())
-	for i := 0; i < struct_type.NumField(); i++ {
-		field := struct_type.Field(i)
-		if col, ok := columnFromStructField(field); ok {
-			cols = append(cols, col)
-		} else if field.Type.Kind() == reflect.Struct {
-			cols = append(cols, columnsFromStructType(field.Type)...)
-		}
-	}
-	return cols
-}
-
-func columnFromStructField(field reflect.StructField) (Column, bool) {
-	ts, ok := goTypeToCassType(field.Type)
-	if ok {
-		return Column{field.Name, ts, typeInfoMap[ts], field.Tag}, true
-	}
-	return Column{}, ok
-}
-
-func goTypeToCassType(t reflect.Type) (string, bool) {
-	var type_name string
-	if t.Kind() == reflect.Slice {
-		if t.Elem().Kind() == reflect.Uint8 {
-			type_name = "[]byte"
-		}
-	} else if t.PkgPath() == "" {
-		type_name = t.Name()
-	} else {
-		type_name = t.PkgPath() + "." + t.Name()
-	}
-	result, ok := columnTypeMap[type_name]
-	return result, ok
 }
 
 // Provide associates an interface with the column family for lookup with GetProvider.
@@ -474,6 +454,13 @@ func (cf *CF) marshal(src interface{}) (MarshaledMap, error) {
 		}
 		return nil, WrapError("row marshal failed", err)
 	}
+	if cf.marshalHooks != nil {
+		for i, hook := range cf.marshalHooks {
+			if err := hook(mmap); err != nil {
+				return nil, WrapError(fmt.Sprintf("marshal hook %d failed", i), err)
+			}
+		}
+	}
 	return mmap, nil
 }
 
@@ -490,6 +477,13 @@ func (cf *CF) unmarshal(dest interface{}, mmap MarshaledMap) error {
 				return err
 			}
 			return WrapError("row unmarshal failed", err)
+		}
+	}
+	if cf.unmarshalHooks != nil {
+		for i, hook := range cf.unmarshalHooks {
+			if err := hook(mmap); err != nil {
+				return WrapError(fmt.Sprintf("unmarshal hook %d failed", i), err)
+			}
 		}
 	}
 	return row.Unmarshal(mmap)
@@ -545,8 +539,55 @@ func (q *CFQuery) Close() error {
 //
 // The returned CF will support row operations on pointers to values of the same type as
 // the given template, without requiring an implementation of the Row interface.
-func ReflectCF(template interface{}) *CF {
+func ReflectCF(template interface{}) (*CF, error) {
 	cf := &CF{}
 	cf.rowReflector = newRowReflector(cf, template)
-	return cf
+	if err := cf.fillFromRowType(cf.rowReflector.rowType.Elem()); err != nil {
+		return nil, err
+	}
+	return cf, nil
+}
+
+func (cf *CF) fillFromRowType(row_type reflect.Type) error {
+	if row_type.Kind() != reflect.Struct {
+		return ErrInvalidRowType
+	}
+	if cf.columns == nil {
+		cf.columns = make([]Column, 0)
+	}
+	pluginType := reflect.TypeOf((*MarshalPlugin)(nil)).Elem()
+	for i := 0; i < row_type.NumField(); i++ {
+		field := row_type.Field(i)
+		if col, ok := columnFromStructField(field); ok {
+			cf.columns = append(cf.columns, col)
+		} else if field.Type.Kind() == reflect.Struct {
+			cf.fillFromRowType(field.Type)
+		} else if field.Type.ConvertibleTo(pluginType) {
+			cf.rowReflector.addMarshalPlugin(field)
+		}
+	}
+	return nil
+}
+
+func columnFromStructField(field reflect.StructField) (Column, bool) {
+	ts, ok := goTypeToCassType(field.Type)
+	if ok {
+		return Column{field.Name, ts, typeInfoMap[ts], field.Tag}, true
+	}
+	return Column{}, ok
+}
+
+func goTypeToCassType(t reflect.Type) (string, bool) {
+	var type_name string
+	if t.Kind() == reflect.Slice {
+		if t.Elem().Kind() == reflect.Uint8 {
+			type_name = "[]byte"
+		}
+	} else if t.PkgPath() == "" {
+		type_name = t.Name()
+	} else {
+		type_name = t.PkgPath() + "." + t.Name()
+	}
+	result, ok := columnTypeMap[type_name]
+	return result, ok
 }

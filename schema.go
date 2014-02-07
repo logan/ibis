@@ -35,7 +35,7 @@ func (s *Schema) AddCF(cf *CF) {
 		cf.typeID = s.nextTypeID
 		s.nextTypeID++
 	}
-	var plugin Plugin
+	var plugin SchemaPlugin
 	if cf.GetProvider(&plugin) {
 		plugin.RegisterColumnTags(&s.ColumnTags)
 	}
@@ -165,11 +165,6 @@ func ReflectSchema(model interface{}) (*Schema, error) {
 				}
 				cf := provider.NewCF()
 				cf.name = strings.ToLower(field.Name)
-				if cf.rowReflector != nil {
-					if err := cf.fillFromRowType(cf.rowReflector.rowType.Elem()); err != nil {
-						return nil, err
-					}
-				}
 				schema.AddCF(cf)
 			}
 		}

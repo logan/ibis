@@ -78,12 +78,17 @@ func TestReflectAndCreate(t *testing.T) {
 }
 
 func TestCrud(t *testing.T) {
+	var err error
 	type crudRow struct {
 		Partition string `ibis:"key"`
 		Cluster   int64  `ibis:"key"`
 		Value     string
 	}
-	model := &struct{ Test *CF }{ReflectCF(crudRow{})}
+	model := &struct{ Test *CF }{}
+	model.Test, err = ReflectCF(crudRow{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	schema := ReflectTestSchema(t, model)
 	defer schema.Cluster.Close()
 
@@ -157,10 +162,15 @@ func TestCrud(t *testing.T) {
 }
 
 func TestProvisioning(t *testing.T) {
+	var err error
 	type row struct {
 		ID string `ibis:"key"`
 	}
-	model := &struct{ Test *CF }{ReflectCF(row{})}
+	model := &struct{ Test *CF }{}
+	model.Test, err = ReflectCF(row{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	schema := ReflectTestSchema(t, model)
 	defer schema.Cluster.Close()
 	cf := model.Test
@@ -189,13 +199,22 @@ func TestProvisioning(t *testing.T) {
 }
 
 func TestPrecommitHooks(t *testing.T) {
+	var err error
 	type rowType struct {
 		ID string `ibis:"key"`
 	}
 	model := &struct {
 		Src  *CF
 		Dest *CF
-	}{ReflectCF(rowType{}), ReflectCF(rowType{})}
+	}{}
+	model.Src, err = ReflectCF(rowType{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.Dest, err = ReflectCF(rowType{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	schema := ReflectTestSchema(t, model)
 	defer schema.Cluster.Close()
 
@@ -237,8 +256,14 @@ func TestMiscCFErrors(t *testing.T) {
 	type r struct {
 		ID string `ibis:"key"`
 	}
-	cf := ReflectCF(r{})
-	unboundCf := ReflectCF(r{})
+	cf, err := ReflectCF(r{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unboundCf, err := ReflectCF(r{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	model := &struct{ T *CF }{cf}
 	schema := ReflectTestSchema(t, model)
 	defer schema.Cluster.Close()
@@ -266,11 +291,16 @@ func TestMiscCFErrors(t *testing.T) {
 }
 
 func TestCFQuery(t *testing.T) {
+	var err error
 	type rowType struct {
 		Partition string `ibis:"key"`
 		Cluster   string `ibis:"key"`
 	}
-	model := &struct{ Test *CF }{ReflectCF(rowType{})}
+	model := &struct{ Test *CF }{}
+	model.Test, err = ReflectCF(rowType{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	schema := ReflectTestSchema(t, model)
 	defer schema.Cluster.Close()
 	cf := model.Test

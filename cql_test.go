@@ -49,7 +49,10 @@ func TestSelectBuilder(t *testing.T) {
 		Y string
 		Z string
 	}
-	cf := ReflectCF(spec{})
+	cf, err := ReflectCF(spec{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	model := &struct{ Test *CF }{cf}
 	schema := ReflectTestSchema(t, model)
 	defer schema.Cluster.Close()

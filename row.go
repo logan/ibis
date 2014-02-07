@@ -127,13 +127,15 @@ func (rv *MarshaledValue) Dirty() bool {
 }
 
 // MarkDirty forces the value to appear dirty.
-func (rv *MarshaledValue) MarkDirty() {
+func (rv *MarshaledValue) MarkDirty() *MarshaledValue {
 	rv.OriginalBytes = nil
+	return rv
 }
 
 // MarkClean forces the value to appear clean.
-func (rv *MarshaledValue) MarkClean() {
+func (rv *MarshaledValue) MarkClean() *MarshaledValue {
 	rv.OriginalBytes = rv.Bytes
+	return rv
 }
 
 func (rv *MarshaledValue) String() string {
@@ -300,12 +302,21 @@ type Row interface {
 }
 
 type rowReflector struct {
-	cf      *CF
-	rowType reflect.Type
+	cf             *CF
+	rowType        reflect.Type
+	marshalPlugins []reflect.StructField
 }
 
 func newRowReflector(cf *CF, template interface{}) *rowReflector {
-	return &rowReflector{cf: cf, rowType: reflect.PtrTo(reflect.TypeOf(template))}
+	return &rowReflector{
+		cf:             cf,
+		rowType:        reflect.PtrTo(reflect.TypeOf(template)),
+		marshalPlugins: make([]reflect.StructField, 0),
+	}
+}
+
+func (s *rowReflector) addMarshalPlugin(field reflect.StructField) {
+	s.marshalPlugins = append(s.marshalPlugins, field)
 }
 
 func (s *rowReflector) reflectedRow(x interface{}) (Row, error) {
@@ -320,12 +331,29 @@ func (s *rowReflector) reflectedRow(x interface{}) (Row, error) {
 	if xValue.IsNil() {
 		return nil, ErrInvalidRowType
 	}
-	return &reflectedRow{cf: s.cf, value: xValue.Convert(s.rowType).Elem()}, nil
+	value := xValue.Convert(s.rowType).Elem()
+
+	marshalPlugins := make([]MarshalPlugin, len(s.marshalPlugins))
+	for i, field := range s.marshalPlugins {
+		pluginValue := value.FieldByIndex(field.Index)
+		if pluginValue.IsNil() {
+			pluginValue.Set(reflect.New(field.Type.Elem()))
+		}
+		marshalPlugins[i] = pluginValue.Interface().(MarshalPlugin)
+	}
+
+	rrow := &reflectedRow{
+		cf:             s.cf,
+		value:          value,
+		marshalPlugins: marshalPlugins,
+	}
+	return rrow, nil
 }
 
 type reflectedRow struct {
-	cf    *CF
-	value reflect.Value
+	cf             *CF
+	value          reflect.Value
+	marshalPlugins []MarshalPlugin
 }
 
 func (rr *reflectedRow) Marshal(mmap MarshaledMap) error {
@@ -361,6 +389,11 @@ func (rr *reflectedRow) Marshal(mmap MarshaledMap) error {
 			}
 		}
 	}
+	for _, plugin := range rr.marshalPlugins {
+		if err = plugin.OnMarshal(mmap); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -385,6 +418,11 @@ func (rr *reflectedRow) Unmarshal(mmap MarshaledMap) error {
 					*t = time.Time{}
 				}
 			}
+		}
+	}
+	for _, plugin := range rr.marshalPlugins {
+		if err := plugin.OnUnmarshal(mmap); err != nil {
+			return err
 		}
 	}
 	return nil

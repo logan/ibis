@@ -36,7 +36,7 @@ func (t *ColumnTags) applyAll(tag reflect.StructTag, cf *CF, col Column) []error
 	return errors
 }
 
-type Plugin interface {
+type SchemaPlugin interface {
 	RegisterColumnTags(*ColumnTags)
 }
 
@@ -56,6 +56,46 @@ func (plugin defaultPlugin) ApplyTag(value string, cf *CF, col Column) error {
 		}
 	default:
 		return errors.New("invalid tag: " + value)
+	}
+	return nil
+}
+
+type MarshalPlugin interface {
+	OnMarshal(MarshaledMap) error
+	OnUnmarshal(MarshaledMap) error
+}
+
+// AutoPatcher provides a plugin for "patched" commits of rows. When you load a row and modify a
+// single field, only that modified field will be committed.
+//
+// Simply include field of type *AutoPatcher in your reflected row struct to activate this behavior.
+// To force a full commit, call the InvalidateAll() method.
+type AutoPatcher MarshaledMap
+
+func (p *AutoPatcher) OnMarshal(mmap MarshaledMap) error {
+	if *p != nil {
+		// Original values are known in p. Fill in OriginalBytes throughout mmap.
+		for k, v := range *p {
+			mv := mmap[k]
+			if mv == nil {
+				if v != nil {
+					mv = &MarshaledValue{TypeInfo: v.TypeInfo}
+				}
+			}
+			if v != nil {
+				mv.OriginalBytes = v.Bytes
+			}
+		}
+	}
+	return nil
+}
+
+func (p *AutoPatcher) OnUnmarshal(mmap MarshaledMap) error {
+	*p = AutoPatcher{}
+	for k, v := range mmap {
+		if v != nil {
+			(*p)[k] = &MarshaledValue{Bytes: v.Bytes, OriginalBytes: v.Bytes, TypeInfo: v.TypeInfo}
+		}
 	}
 	return nil
 }

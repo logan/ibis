@@ -15,7 +15,7 @@ type table struct {
 }
 
 func (t *table) NewCF() *CF {
-	t.CF = ReflectCF(row{})
+	t.CF, _ = ReflectCF(row{})
 	return t.cf
 }
 
@@ -145,7 +145,7 @@ func TestAddCF(t *testing.T) {
 	Convey("AddCF should register plugins", t, func() {
 		p := new(pluginTest)
 		cf := NewCF("test")
-		cf.Provide(Plugin(p))
+		cf.Provide(SchemaPlugin(p))
 		So(bool(*p), ShouldBeFalse)
 
 		schema := NewSchema()

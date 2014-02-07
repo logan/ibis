@@ -259,7 +259,7 @@ type marshalTestTable struct {
 }
 
 func (t *marshalTestTable) NewCF() *CF {
-	t.CF = ReflectCF(marshalTestRow{})
+	t.CF, _ = ReflectCF(marshalTestRow{})
 	return t.CF
 }
 

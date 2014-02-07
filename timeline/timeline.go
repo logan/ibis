@@ -37,7 +37,7 @@ type IndexTable struct {
 }
 
 func (t *IndexTable) NewCF() *ibis.CF {
-	t.CF = ibis.ReflectCF(Entry{})
+	t.CF, _ = ibis.ReflectCF(Entry{})
 	t.Provide(IndexProvider(t))
 	return t.CF
 }
@@ -199,7 +199,7 @@ type TimelinePlugin struct {
 func (plugin *TimelinePlugin) NewCF() *ibis.CF {
 	plugin.IndexTable = new(IndexTable)
 	cf := plugin.IndexTable.NewCF()
-	cf.Provide(ibis.Plugin(plugin))
+	cf.Provide(ibis.SchemaPlugin(plugin))
 	cf.Provide(IndexProvider(plugin))
 	return cf
 }

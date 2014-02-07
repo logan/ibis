@@ -118,6 +118,8 @@ func TestIndex(t *testing.T) {
 }
 
 func TestPlugin(t *testing.T) {
+	var err error
+
 	type Row struct {
 		Name      string        `ibis:"key"`
 		Created   ibis.TimeUUID `ibis.timeline:"AllRows, RowsBy(Name)"`
@@ -129,7 +131,11 @@ func TestPlugin(t *testing.T) {
 		Rows    *ibis.CF
 	}
 
-	model := &Model{Rows: ibis.ReflectCF(Row{})}
+	model := &Model{}
+	model.Rows, err = ibis.ReflectCF(Row{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	schema := ibis.ReflectTestSchema(t, model)
 	defer schema.Cluster.Close()
 
