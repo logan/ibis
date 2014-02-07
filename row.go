@@ -101,42 +101,42 @@ var column_validators = map[string]string{
 	"org.apache.cassandra.db.marshal.TimeUUIDType":  "timeuuid",
 }
 
-// MarshalledValue contains the bytes and type info for a value that has already been marshalled for
+// MarshaledValue contains the bytes and type info for a value that has already been marshaled for
 // Cassandra.
-type MarshalledValue struct {
+type MarshaledValue struct {
 	Bytes         []byte
 	TypeInfo      *gocql.TypeInfo
 	OriginalBytes []byte
 }
 
 // MarshalCQL trivially implements the gocql.Marshaler interface.
-func (rv *MarshalledValue) MarshalCQL(info *gocql.TypeInfo) ([]byte, error) {
+func (rv *MarshaledValue) MarshalCQL(info *gocql.TypeInfo) ([]byte, error) {
 	return rv.Bytes, nil
 }
 
 // UnmarshalCQL trivially implements the gocql.Marshaler interface.
-func (rv *MarshalledValue) UnmarshalCQL(info *gocql.TypeInfo, bytes []byte) error {
+func (rv *MarshaledValue) UnmarshalCQL(info *gocql.TypeInfo, bytes []byte) error {
 	rv.Bytes = bytes
 	rv.TypeInfo = info
 	return nil
 }
 
-// Dirty returns true if a MarshalledValue's Bytes are the same as its OriginalBytes.
-func (rv *MarshalledValue) Dirty() bool {
+// Dirty returns true if a MarshaledValue's Bytes are the same as its OriginalBytes.
+func (rv *MarshaledValue) Dirty() bool {
 	return !bytes.Equal(rv.Bytes, rv.OriginalBytes)
 }
 
 // MarkDirty forces the value to appear dirty.
-func (rv *MarshalledValue) MarkDirty() {
+func (rv *MarshaledValue) MarkDirty() {
 	rv.OriginalBytes = nil
 }
 
 // MarkClean forces the value to appear clean.
-func (rv *MarshalledValue) MarkClean() {
+func (rv *MarshaledValue) MarkClean() {
 	rv.OriginalBytes = rv.Bytes
 }
 
-func (rv *MarshalledValue) String() string {
+func (rv *MarshaledValue) String() string {
 	var dirty string
 	if rv.Dirty() {
 		dirty = " (dirty)"
@@ -144,7 +144,7 @@ func (rv *MarshalledValue) String() string {
 	return fmt.Sprintf("%+v%s", rv.Bytes, dirty)
 }
 
-func (v *MarshalledValue) cmp(w *MarshalledValue) (int, error) {
+func (v *MarshaledValue) cmp(w *MarshaledValue) (int, error) {
 	if v == nil {
 		if w == nil {
 			return 0, nil
@@ -158,11 +158,11 @@ func (v *MarshalledValue) cmp(w *MarshalledValue) (int, error) {
 		return 0, errors.New("different types are not comparable")
 	}
 
-	x, err := unmarshal((*MarshalledValue)(v))
+	x, err := unmarshal((*MarshaledValue)(v))
 	if err != nil {
 		return 0, err
 	}
-	y, err := unmarshal((*MarshalledValue)(w))
+	y, err := unmarshal((*MarshaledValue)(w))
 	if err != nil {
 		return 0, err
 	}
@@ -235,12 +235,12 @@ func (v *MarshalledValue) cmp(w *MarshalledValue) (int, error) {
 	}
 }
 
-// MarshalledMap is a map of column names to marshalled values.
-type MarshalledMap map[string]*MarshalledValue
+// MarshaledMap is a map of column names to marshaled values.
+type MarshaledMap map[string]*MarshaledValue
 
-// InterfacesFor returns the marshalled values associated with the given keys as bare interfaces.
+// InterfacesFor returns the marshaled values associated with the given keys as bare interfaces.
 // They are returned in order corresponding to that of the given keys.
-func (rv *MarshalledMap) InterfacesFor(keys ...string) []interface{} {
+func (rv *MarshaledMap) InterfacesFor(keys ...string) []interface{} {
 	result := make([]interface{}, len(keys))
 	for i, k := range keys {
 		result[i] = (*rv)[k]
@@ -248,31 +248,31 @@ func (rv *MarshalledMap) InterfacesFor(keys ...string) []interface{} {
 	return result
 }
 
-// PointersTo associates new marshalled values in the map and returns pointers to them to be filled
+// PointersTo associates new marshaled values in the map and returns pointers to them to be filled
 // in by methods like Query.Scan. The pointers are returned as a list of interfaces in order
 // corresponding to that of the given keys.
-func (rv *MarshalledMap) PointersTo(keys ...string) []interface{} {
+func (rv *MarshaledMap) PointersTo(keys ...string) []interface{} {
 	result := make([]interface{}, len(keys))
 	for i, k := range keys {
-		(*rv)[k] = &MarshalledValue{}
+		(*rv)[k] = &MarshaledValue{}
 		result[i] = (*rv)[k]
 	}
 	return result
 }
 
-// ValuesOf returns the marshalled values associated with the given keys, in the order given by
+// ValuesOf returns the marshaled values associated with the given keys, in the order given by
 // keys. Keys with no association will have a corresponding nil value returned.
-func (rv *MarshalledMap) ValuesOf(keys ...string) []*MarshalledValue {
-	result := make([]*MarshalledValue, len(keys))
+func (rv *MarshaledMap) ValuesOf(keys ...string) []*MarshaledValue {
+	result := make([]*MarshaledValue, len(keys))
 	for i, k := range keys {
 		result[i] = (*rv)[k]
 	}
 	return result
 }
 
-// Keys returns the keys in the map that have an associated marshalled value, in no particular
+// Keys returns the keys in the map that have an associated marshaled value, in no particular
 // order.
-func (rv *MarshalledMap) Keys() []string {
+func (rv *MarshaledMap) Keys() []string {
 	keys := make([]string, 0, len(*rv))
 	for k, v := range *rv {
 		if v != nil {
@@ -282,8 +282,8 @@ func (rv *MarshalledMap) Keys() []string {
 	return keys
 }
 
-// DirtyKeys returns the keys in the map that are associated with a dirty marshalled value.
-func (rv *MarshalledMap) DirtyKeys() []string {
+// DirtyKeys returns the keys in the map that are associated with a dirty marshaled value.
+func (rv *MarshaledMap) DirtyKeys() []string {
 	dirties := make([]string, 0, len(*rv))
 	for k, v := range *rv {
 		if v != nil && v.Dirty() {
@@ -293,10 +293,10 @@ func (rv *MarshalledMap) DirtyKeys() []string {
 	return dirties
 }
 
-// A Row is capable of pointing to its column family and marshalling/unmarshalling itself.
+// A Row is capable of pointing to its column family and marshaling/unmarshaling itself.
 type Row interface {
-	Marshal(MarshalledMap) error
-	Unmarshal(MarshalledMap) error
+	Marshal(MarshaledMap) error
+	Unmarshal(MarshaledMap) error
 }
 
 type rowReflector struct {
@@ -328,10 +328,10 @@ type reflectedRow struct {
 	value reflect.Value
 }
 
-func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
+func (rr *reflectedRow) Marshal(mmap MarshaledMap) error {
 	var (
-		marshalled []byte
-		err        error
+		marshaled []byte
+		err       error
 	)
 	for _, col := range rr.cf.columns {
 		fieldval := rr.value.FieldByName(col.Name)
@@ -346,17 +346,17 @@ func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
 				}
 			}
 			if t, ok := fieldval.Interface().(time.Time); ok && t.IsZero() {
-				// zero time values aren't marshalled correctly by gocql; they go into cassandra
+				// zero time values aren't marshaled correctly by gocql; they go into cassandra
 				// as 1754-08-30 22:43:41.129 +0000 UTC.
-				marshalled, err = gocql.Marshal(col.typeInfo, int64(0))
+				marshaled, err = gocql.Marshal(col.typeInfo, int64(0))
 			} else {
-				marshalled, err = gocql.Marshal(col.typeInfo, fieldval.Interface())
+				marshaled, err = gocql.Marshal(col.typeInfo, fieldval.Interface())
 			}
 			if err != nil {
 				return err
 			}
-			mmap[col.Name] = &MarshalledValue{
-				Bytes:    marshalled,
+			mmap[col.Name] = &MarshaledValue{
+				Bytes:    marshaled,
 				TypeInfo: col.typeInfo,
 			}
 		}
@@ -364,7 +364,7 @@ func (rr *reflectedRow) Marshal(mmap MarshalledMap) error {
 	return nil
 }
 
-func (rr *reflectedRow) Unmarshal(mmap MarshalledMap) error {
+func (rr *reflectedRow) Unmarshal(mmap MarshaledMap) error {
 	for k, v := range mmap {
 		if v.Bytes != nil {
 			target := rr.value.FieldByName(k)
@@ -374,7 +374,7 @@ func (rr *reflectedRow) Unmarshal(mmap MarshalledMap) error {
 			if err := gocql.Unmarshal(v.TypeInfo, v.Bytes, target.Addr().Interface()); err != nil {
 				return err
 			}
-			// zero time values aren't unmarshalled correctly by gocql; when cassandra returns a
+			// zero time values aren't unmarshaled correctly by gocql; when cassandra returns a
 			// time at 0 relative to its own epoch, we should zero it relative to time.Time's epoch
 			if t, ok := target.Addr().Interface().(*time.Time); ok {
 				var x int64

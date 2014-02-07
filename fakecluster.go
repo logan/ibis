@@ -92,28 +92,28 @@ func (c *fakeCluster) schemaColumnFamilies() *fakeTable {
 		Columns: []string{"keyspace_name", "columnfamily_name", "key_aliases", "column_aliases",
 			"comment"},
 		Key:  []string{"keyspace_name", "columnfamily_name"},
-		Rows: make([]MarshalledMap, 0),
+		Rows: make([]MarshaledMap, 0),
 	}
-	stringList := func(values []string) *MarshalledValue {
+	stringList := func(values []string) *MarshaledValue {
 		var val string
 		if len(values) == 0 {
 			val = "[]"
 		} else {
 			val = fmt.Sprintf(`["%s"]`, strings.Join(values, `", "`))
 		}
-		return (*MarshalledValue)(LiteralValue(val))
+		return (*MarshaledValue)(LiteralValue(val))
 	}
 	for ksname, ks := range c.Keyspaces {
 		for tname, t := range ks.CFs {
-			mmap := make(MarshalledMap)
-			mmap["keyspace_name"] = (*MarshalledValue)(LiteralValue(ksname))
-			mmap["columnfamily_name"] = (*MarshalledValue)(LiteralValue(tname))
+			mmap := make(MarshaledMap)
+			mmap["keyspace_name"] = (*MarshaledValue)(LiteralValue(ksname))
+			mmap["columnfamily_name"] = (*MarshaledValue)(LiteralValue(tname))
 			mmap["key_aliases"] = stringList(t.Key[:1])
 			mmap["column_aliases"] = stringList(t.Key[1:])
-			mmap["comment"] = (*MarshalledValue)(LiteralValue(""))
+			mmap["comment"] = (*MarshaledValue)(LiteralValue(""))
 			if t.Options != nil {
 				if c, ok := t.Options["comment"]; ok {
-					mmap["comment"] = (*MarshalledValue)(LiteralValue(c))
+					mmap["comment"] = (*MarshaledValue)(LiteralValue(c))
 				}
 			}
 			table.Rows = append(table.Rows, mmap)
@@ -126,7 +126,7 @@ func (c *fakeCluster) schemaColumns() *fakeTable {
 	table := &fakeTable{
 		Columns: []string{"keyspace_name", "columnfamily_name", "column_name", "validator"},
 		Key:     []string{"keyspace_name", "columnfamily_name"},
-		Rows:    make([]MarshalledMap, 0),
+		Rows:    make([]MarshaledMap, 0),
 	}
 	validator := func(coltype *gocql.TypeInfo) string {
 		for n, ti := range typeInfoMap {
@@ -143,11 +143,11 @@ func (c *fakeCluster) schemaColumns() *fakeTable {
 	for ksname, ks := range c.Keyspaces {
 		for tname, t := range ks.CFs {
 			for i, colname := range t.Columns {
-				mmap := make(MarshalledMap)
-				mmap["keyspace_name"] = (*MarshalledValue)(LiteralValue(ksname))
-				mmap["columnfamily_name"] = (*MarshalledValue)(LiteralValue(strings.ToLower(tname)))
-				mmap["column_name"] = (*MarshalledValue)(LiteralValue(colname))
-				mmap["validator"] = (*MarshalledValue)(LiteralValue(validator(t.ColumnTypes[i])))
+				mmap := make(MarshaledMap)
+				mmap["keyspace_name"] = (*MarshaledValue)(LiteralValue(ksname))
+				mmap["columnfamily_name"] = (*MarshaledValue)(LiteralValue(strings.ToLower(tname)))
+				mmap["column_name"] = (*MarshaledValue)(LiteralValue(colname))
+				mmap["validator"] = (*MarshaledValue)(LiteralValue(validator(t.ColumnTypes[i])))
 				table.Rows = append(table.Rows, mmap)
 			}
 		}
@@ -219,11 +219,11 @@ type fakeTable struct {
 	Columns     []string
 	ColumnTypes []*gocql.TypeInfo
 	Key         []string
-	Rows        []MarshalledMap
+	Rows        []MarshaledMap
 	Options     optionMap
 }
 
-func (t *fakeTable) Get(keyvals []*MarshalledValue) MarshalledMap {
+func (t *fakeTable) Get(keyvals []*MarshaledValue) MarshaledMap {
 	for _, row := range t.Rows {
 		if row.Match(t.Key, keyvals) {
 			return row
@@ -232,7 +232,7 @@ func (t *fakeTable) Get(keyvals []*MarshalledValue) MarshalledMap {
 	return nil
 }
 
-func (t *fakeTable) Set(mmap MarshalledMap, cas bool) (MarshalledMap, bool, error) {
+func (t *fakeTable) Set(mmap MarshaledMap, cas bool) (MarshaledMap, bool, error) {
 	values := mmap.ValuesOf(t.Key...)
 	for i, v := range values {
 		if v == nil {
@@ -245,7 +245,7 @@ func (t *fakeTable) Set(mmap MarshalledMap, cas bool) (MarshalledMap, bool, erro
 			return row, false, nil
 		}
 	} else {
-		row = make(MarshalledMap)
+		row = make(MarshaledMap)
 		t.Rows = append(t.Rows, row)
 	}
 	for k, v := range mmap {
@@ -260,12 +260,12 @@ type comparison struct {
 	val pval
 }
 
-func (cmp *comparison) match(row MarshalledMap, binds valueList) (bool, error) {
+func (cmp *comparison) match(row MarshaledMap, binds valueList) (bool, error) {
 	left, ok := row[cmp.col]
 	if !ok || left == nil {
 		return false, nil
 	}
-	v := (*MarshalledValue)(left)
+	v := (*MarshaledValue)(left)
 	c, err := v.cmp(cmp.val.Get(binds))
 	if err != nil {
 		return false, err
@@ -309,8 +309,8 @@ func (s sortInterface) Len() int { return len(s.rows) }
 
 func (s sortInterface) Less(i, j int) bool {
 	for _, o := range s.order {
-		vi := (*MarshalledValue)(s.rows[i].Row[o.col])
-		vj := (*MarshalledValue)(s.rows[j].Row[o.col])
+		vi := (*MarshaledValue)(s.rows[i].Row[o.col])
+		vj := (*MarshaledValue)(s.rows[j].Row[o.col])
 		if vi == nil {
 			return o.dir == asc
 		}
@@ -373,15 +373,15 @@ func (t *fakeTable) Query(cols []string, where []comparison, binds valueList) (r
 		}
 	}
 	if cols == nil {
-		srow := selectedRow{Row: make(MarshalledMap), Columns: []string{"count"}}
-		srow.Row["count"] = (*MarshalledValue)(LiteralValue(count))
+		srow := selectedRow{Row: make(MarshaledMap), Columns: []string{"count"}}
+		srow.Row["count"] = (*MarshaledValue)(LiteralValue(count))
 		rows = append(rows, srow)
 	}
 	return rows, nil
 }
 
 type selectedRow struct {
-	Row     MarshalledMap
+	Row     MarshaledMap
 	Columns []string
 }
 
@@ -412,7 +412,7 @@ func (rs resultSet) String() string {
 	return strings.Join(lines, "\n")
 }
 
-func (r *MarshalledMap) Match(key []string, values []*MarshalledValue) bool {
+func (r *MarshaledMap) Match(key []string, values []*MarshaledValue) bool {
 	if len(key) != len(values) {
 		return false
 	}
@@ -424,7 +424,7 @@ func (r *MarshalledMap) Match(key []string, values []*MarshalledValue) bool {
 		if !ok || v == nil {
 			return false
 		}
-		cmp, err := (*MarshalledValue)(values[i]).cmp((*MarshalledValue)(v))
+		cmp, err := (*MarshaledValue)(values[i]).cmp((*MarshaledValue)(v))
 		if err != nil || cmp != 0 {
 			return false
 		}
@@ -432,17 +432,17 @@ func (r *MarshalledMap) Match(key []string, values []*MarshalledValue) bool {
 	return true
 }
 
-func (r *MarshalledMap) Select(keys []string) selectedRow {
-	srow := selectedRow{Row: make(MarshalledMap), Columns: keys}
+func (r *MarshaledMap) Select(keys []string) selectedRow {
+	srow := selectedRow{Row: make(MarshaledMap), Columns: keys}
 	for k, v := range *r {
 		srow.Row[k] = v
 	}
 	return srow
 }
 
-type valueList []*MarshalledValue
+type valueList []*MarshaledValue
 
-func unmarshal(mval *MarshalledValue) (interface{}, error) {
+func unmarshal(mval *MarshaledValue) (interface{}, error) {
 	if mval == nil {
 		return nil, nil
 	}
@@ -479,11 +479,11 @@ func unmarshal(mval *MarshalledValue) (interface{}, error) {
 	return reflect.ValueOf(addr).Elem().Interface(), nil
 }
 
-func LiteralValue(val interface{}) *MarshalledValue {
+func LiteralValue(val interface{}) *MarshaledValue {
 	var ti *gocql.TypeInfo
 	switch val.(type) {
-	case *MarshalledValue:
-		return val.(*MarshalledValue)
+	case *MarshaledValue:
+		return val.(*MarshaledValue)
 	case bool:
 		ti = TIBoolean
 	case []byte:
@@ -502,20 +502,20 @@ func LiteralValue(val interface{}) *MarshalledValue {
 	if ti == nil {
 		return nil
 	}
-	marshalled, err := gocql.Marshal(ti, val)
+	marshaled, err := gocql.Marshal(ti, val)
 	if err != nil {
 		return nil
 	}
-	mv := &MarshalledValue{Bytes: marshalled, TypeInfo: ti}
-	return (*MarshalledValue)(mv)
+	mv := &MarshaledValue{Bytes: marshaled, TypeInfo: ti}
+	return (*MarshaledValue)(mv)
 }
 
 type pval struct {
-	Value    *MarshalledValue
+	Value    *MarshaledValue
 	VarIndex int
 }
 
-func (vi pval) Get(binds valueList) *MarshalledValue {
+func (vi pval) Get(binds valueList) *MarshaledValue {
 	if vi.Value == nil {
 		return binds[vi.VarIndex]
 	}

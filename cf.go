@@ -17,7 +17,7 @@ var (
 )
 
 // A type of function that produces CQL statements to execute before committing data.
-type PrecommitHook func(interface{}, MarshalledMap) ([]CQL, error)
+type PrecommitHook func(interface{}, MarshaledMap) ([]CQL, error)
 
 // CFProvider is an interface for producing and configuring a column family definition. Use
 // CFProvider when specifying a schema struct for ReflectSchema(). Exported fields that implement
@@ -281,7 +281,7 @@ func (cf *CF) LoadByKey(dest interface{}, key ...interface{}) error {
 		sel.Where(k+" = ?", key[i])
 	}
 	qiter := sel.CQL().Query()
-	mmap := make(MarshalledMap)
+	mmap := make(MarshaledMap)
 	if !qiter.Scan(mmap.PointersTo(colnames...)...) {
 		if err := qiter.Close(); err != nil {
 			return err
@@ -343,7 +343,7 @@ func (cf *CF) MakeCommitCAS(row interface{}) (CQL, error) {
 	return cql, nil
 }
 
-func (cf *CF) applyPrecommitHooks(row interface{}, mmap MarshalledMap) ([]CQL, error) {
+func (cf *CF) applyPrecommitHooks(row interface{}, mmap MarshaledMap) ([]CQL, error) {
 	total := make([]CQL, 0)
 	if cf.precommitHooks != nil {
 		for _, hook := range cf.precommitHooks {
@@ -357,7 +357,7 @@ func (cf *CF) applyPrecommitHooks(row interface{}, mmap MarshalledMap) ([]CQL, e
 	return total, nil
 }
 
-func (cf *CF) generateCommit(mmap MarshalledMap, cas bool) (cql CQL, ok bool) {
+func (cf *CF) generateCommit(mmap MarshaledMap, cas bool) (cql CQL, ok bool) {
 	// TODO: make the cas path more separate?
 	if cas {
 		selectedKeys := make([]string, len(cf.columns))
@@ -436,9 +436,9 @@ func (cf *CF) commit(row interface{}, cas bool) error {
 	if cas {
 		// A CAS query uses ScanCAS for the lightweight transaction. This returns a boolean
 		// indicating success, and a row with the values that were committed. We don't need this
-		// response, but we need to supply MarshalledValue pointers for the returned columns anyway.
+		// response, but we need to supply MarshaledValue pointers for the returned columns anyway.
 		// Despite this, the values pointed to will not be filled in except in the case of error.
-		casmap := make(MarshalledMap)
+		casmap := make(MarshaledMap)
 		selectedKeys := make([]string, len(cf.columns))
 		for i, col := range cf.columns {
 			selectedKeys[i] = col.Name
@@ -461,7 +461,7 @@ func (cf *CF) commit(row interface{}, cas bool) error {
 	return cf.unmarshal(row, mmap)
 }
 
-func (cf *CF) marshal(src interface{}) (MarshalledMap, error) {
+func (cf *CF) marshal(src interface{}) (MarshaledMap, error) {
 	row, ok := src.(Row)
 	if !ok {
 		if cf.rowReflector == nil {
@@ -473,14 +473,14 @@ func (cf *CF) marshal(src interface{}) (MarshalledMap, error) {
 			return nil, err
 		}
 	}
-	mmap := make(MarshalledMap)
+	mmap := make(MarshaledMap)
 	if err := row.Marshal(mmap); err != nil {
 		return nil, err
 	}
 	return mmap, nil
 }
 
-func (cf *CF) unmarshal(dest interface{}, mmap MarshalledMap) error {
+func (cf *CF) unmarshal(dest interface{}, mmap MarshaledMap) error {
 	row, ok := dest.(Row)
 	if !ok {
 		if cf.rowReflector == nil {
@@ -510,7 +510,7 @@ func (q *CFQuery) ScanRow(dest interface{}) bool {
 	for i, col := range q.cf.columns {
 		cols[i] = col.Name
 	}
-	mmap := make(MarshalledMap)
+	mmap := make(MarshaledMap)
 	if ok := q.query.Scan(mmap.PointersTo(cols...)...); !ok {
 		q.err = q.query.Close()
 		return false

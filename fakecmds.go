@@ -56,7 +56,7 @@ func (cmd *createTableCommand) Execute(ks *fakeKeyspace, vals valueList) (result
 		ColumnTypes: cmd.coltypes,
 		Key:         cmd.key,
 		Options:     cmd.options,
-		Rows:        make([]MarshalledMap, 0),
+		Rows:        make([]MarshaledMap, 0),
 	}
 	ks.AddCF(cmd.identifier, table)
 	return resultSet{}, nil
@@ -106,9 +106,9 @@ func (cmd *insertCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, 
 	if len(cmd.keys) != len(cmd.values) {
 		return nil, errors.New("number of keys and number of values do not match")
 	}
-	mmap := make(MarshalledMap)
+	mmap := make(MarshaledMap)
 	for i, k := range cmd.keys {
-		mmap[k] = (*MarshalledValue)(cmd.values[i].Get(vals))
+		mmap[k] = (*MarshaledValue)(cmd.values[i].Get(vals))
 	}
 	row, applied, err := cf.Set(mmap, cmd.cas)
 	if err != nil {
@@ -117,7 +117,7 @@ func (cmd *insertCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, 
 	srow := row.Select(cmd.keys)
 	if cmd.cas {
 		srow.Columns = append([]string{"*applied"}, srow.Columns...)
-		srow.Row["*applied"] = (*MarshalledValue)(LiteralValue(applied))
+		srow.Row["*applied"] = (*MarshaledValue)(LiteralValue(applied))
 	}
 	return resultSet{srow}, nil
 }
@@ -157,12 +157,12 @@ func (cmd *updateCommand) Execute(ks *fakeKeyspace, vals valueList) (resultSet, 
 	if err != nil {
 		return nil, err
 	}
-	mmap := make(MarshalledMap)
+	mmap := make(MarshaledMap)
 	for k, v := range cmd.set {
-		mmap[k] = (*MarshalledValue)(v.Get(vals))
+		mmap[k] = (*MarshaledValue)(v.Get(vals))
 	}
 	for k, v := range cmd.key {
-		mmap[k] = (*MarshalledValue)(v.Get(vals))
+		mmap[k] = (*MarshaledValue)(v.Get(vals))
 	}
 	if _, _, err := cf.Set(mmap, false); err != nil {
 		return nil, err

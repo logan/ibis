@@ -203,7 +203,7 @@ func TestPrecommitHooks(t *testing.T) {
 	dest := model.Dest
 	failErr := errors.New("failErr")
 
-	src.Precommit(func(row interface{}, mmap MarshalledMap) ([]CQL, error) {
+	src.Precommit(func(row interface{}, mmap MarshaledMap) ([]CQL, error) {
 		id := row.(*rowType).ID
 		if id == "fail" {
 			return nil, failErr

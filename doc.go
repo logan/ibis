@@ -39,7 +39,7 @@ Reflection is also available for defining column families themselves:
         model := &Model{}
         schema := ibis.ReflectSchema(model)
 
-Using this reflective approach has the added benefit of eliminating the need to provide marshalling
+Using this reflective approach has the added benefit of eliminating the need to provide marshaling
 code to get data into and out of User values, as will be described shortly.
 
 Note that you must specify the primary key for the column family. This can be done with the
@@ -78,17 +78,17 @@ given one.
             }
         }
 
-Marshalling
+Marshaling
 
-The basis by which ibis reads and writes rows is the MarshalledMap. This is gocql marshalling
+The basis by which ibis reads and writes rows is the MarshaledMap. This is gocql marshaling
 applied to a map of values. To use ibis at the lowest level, you can implement the Row interface:
 
         type User struct {Name string, Password string}
-        func (u *User) Marshal(mmap ibis.MarshalledMap) error {
+        func (u *User) Marshal(mmap ibis.MarshaledMap) error {
             mmap["Name"] = ibis.LiteralValue(u.Name)
             mmap["Password"] = ibis.LiteralValue(encryptPassword(u.Password))
         }
-        func (u *User) Unmarshal(mmap ibis.MarshalledMap) error {
+        func (u *User) Unmarshal(mmap ibis.MarshaledMap) error {
             var b []byte
             if v := mmap["Name"]; v != nil {
                 if err := v.UnmarshalCQL(ibis.TIVarchar, &b); err != nil { return err }

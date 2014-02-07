@@ -231,7 +231,7 @@ type timelinePrecommitter struct {
 	timelineDefs map[string][]timelineDef
 }
 
-func (hook *timelinePrecommitter) precommit(row interface{}, mmap ibis.MarshalledMap) (
+func (hook *timelinePrecommitter) precommit(row interface{}, mmap ibis.MarshaledMap) (
 	[]ibis.CQL, error) {
 	cqls := make([]ibis.CQL, 0)
 	for colName, defs := range hook.timelineDefs {
@@ -258,7 +258,7 @@ func (hook *timelinePrecommitter) precommit(row interface{}, mmap ibis.Marshalle
 	return cqls, nil
 }
 
-func (hook *timelinePrecommitter) onUUIDChange(row interface{}, mmap ibis.MarshalledMap,
+func (hook *timelinePrecommitter) onUUIDChange(row interface{}, mmap ibis.MarshaledMap,
 	oldU, newU ibis.TimeUUID, defs []timelineDef) ([]ibis.CQL, error) {
 	cqls := make([]ibis.CQL, 0)
 	if newU.IsSet() {
