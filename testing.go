@@ -91,16 +91,16 @@ func (tc *testConn) Close() {
 }
 
 func ReflectTestSchema(t *testing.T, model interface{}) *Schema {
-	schema := ReflectSchema(model)
+	schema, err := ReflectSchema(model)
+	if err != nil {
+		t.Fatal(err)
+	}
 	schema.Cluster = NewTestConn(t)
-
-	var err error
 	if schema.SchemaUpdates, err = DiffLiveSchema(schema.Cluster, schema); err != nil {
 		t.Fatal(err)
 	}
 	if err = schema.ApplySchemaUpdates(); err != nil {
 		t.Fatal(err)
 	}
-
 	return schema
 }

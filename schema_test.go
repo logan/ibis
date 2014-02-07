@@ -33,7 +33,8 @@ func TestSchemaMiscellanea(t *testing.T) {
 			err error
 		)
 		cluster := NewTestConn(t)
-		schema := ReflectSchema(&m)
+		schema, err := ReflectSchema(&m)
+		So(err, ShouldBeNil)
 		So(schema.RequiresUpdates(), ShouldBeFalse)
 
 		schema.SchemaUpdates, err = DiffLiveSchema(cluster, schema)
@@ -44,7 +45,8 @@ func TestSchemaMiscellanea(t *testing.T) {
 		err = schema.ApplySchemaUpdates()
 		So(err, ShouldBeNil)
 
-		schema = ReflectSchema(&m)
+		schema, err = ReflectSchema(&m)
+		So(err, ShouldBeNil)
 		schema.SchemaUpdates, err = DiffLiveSchema(cluster, schema)
 
 		So(err, ShouldBeNil)
@@ -65,7 +67,10 @@ func TestReflectSchema(t *testing.T) {
 		Column{Name: "Int", Type: "bigint", typeInfo: TIBigInt},
 	}
 	m.Defined = NewCF("Defined", expectedColumns...).SetPrimaryKey("Str")
-	schema := ReflectSchema(m)
+	schema, err := ReflectSchema(m)
+	if err != nil {
+		t.Fatal(err)
+	}
 	expectedPrimaryKey := []string{"Str"}
 
 	Convey("Boilerplate-y table definition", t, func() {
@@ -88,8 +93,10 @@ func TestReflectSchema(t *testing.T) {
 	})
 
 	Convey("Should panic on invalid argument", t, func() {
-		So(func() { ReflectSchema(8) }, ShouldPanicWith, "model must be pointer to struct")
-		So(func() { ReflectSchema(model{}) }, ShouldPanicWith, "model must be pointer to struct")
+		_, err := ReflectSchema(8)
+		So(err, ShouldEqual, ErrInvalidSchemaType)
+		_, err = ReflectSchema(model{})
+		So(err, ShouldEqual, ErrInvalidSchemaType)
 	})
 }
 

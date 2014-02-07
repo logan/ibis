@@ -136,11 +136,12 @@ type Column struct {
 	tag      reflect.StructTag
 }
 
-func (cf *CF) fillFromRowType(row_type reflect.Type) {
+func (cf *CF) fillFromRowType(row_type reflect.Type) error {
 	if row_type.Kind() != reflect.Struct {
-		panic("row must be struct")
+		return ErrInvalidRowType
 	}
 	cf.columns = columnsFromStructType(row_type)
+	return nil
 }
 
 func columnsFromStructType(struct_type reflect.Type) []Column {

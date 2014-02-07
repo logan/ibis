@@ -21,12 +21,14 @@ func newTestModel(t *testing.T) *testModel {
 		cluster:   ibis.NewTestConn(t),
 		lastSeqID: new(ibis.FakeSeqIDGenerator).Set(36*36*36 - 1),
 	}
-	schema := ibis.ReflectSchema(model)
+	schema, err := ibis.ReflectSchema(model)
+	if err != nil {
+		t.Fatal(err)
+	}
 	schema.Cluster = model.cluster
 	// set up seqid sequence to be 1000, 1001, 1002, ...
 	model.Indexes.Provide(ibis.SeqIDGenerator(model.lastSeqID))
 
-	var err error
 	if schema.SchemaUpdates, err = ibis.DiffLiveSchema(model.cluster, schema); err != nil {
 		t.Fatal(err)
 	}

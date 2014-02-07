@@ -135,17 +135,17 @@ func (s *Schema) IsBound() bool {
 //       }
 //       type Model struct{Users *UserTable}
 //       model := &Model{}
-//       schema := ibis.ReflectSchemaFrom(model)
+//       schema, err := ibis.ReflectSchema(model)
 //
-func ReflectSchema(model interface{}) *Schema {
+func ReflectSchema(model interface{}) (*Schema, error) {
 	ptr_type := reflect.TypeOf(model)
 	if ptr_type.Kind() != reflect.Ptr {
-		panic("model must be pointer to struct")
+		return nil, ErrInvalidSchemaType
 	}
 	model_value := reflect.Indirect(reflect.ValueOf(model))
 	model_type := model_value.Type()
 	if model_type.Kind() != reflect.Struct {
-		panic("model must be pointer to struct")
+		return nil, ErrInvalidSchemaType
 	}
 	providerType := reflect.TypeOf((*CFProvider)(nil)).Elem()
 	schema := NewSchema()
@@ -166,11 +166,13 @@ func ReflectSchema(model interface{}) *Schema {
 				cf := provider.NewCF()
 				cf.name = strings.ToLower(field.Name)
 				if cf.rowReflector != nil {
-					cf.fillFromRowType(cf.rowReflector.rowType.Elem())
+					if err := cf.fillFromRowType(cf.rowReflector.rowType.Elem()); err != nil {
+						return nil, err
+					}
 				}
 				schema.AddCF(cf)
 			}
 		}
 	}
-	return schema
+	return schema, nil
 }

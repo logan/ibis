@@ -48,7 +48,7 @@ func TestReflectAndCreate(t *testing.T) {
 	}
 
 	Convey("Passing a non-struct type to fillFromRowType should panic", t, func() {
-		So(func() { cf.fillFromRowType(reflect.TypeOf(8)) }, ShouldPanicWith, "row must be struct")
+		So(cf.fillFromRowType(reflect.TypeOf(8)), ShouldEqual, ErrInvalidRowType)
 	})
 
 	Convey("Checking reflected schema", t, func() {
